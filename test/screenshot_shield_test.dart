@@ -1,11 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:screenshot_guard/screenshot_guard.dart';
-import 'package:screenshot_guard/screenshot_guard_platform_interface.dart';
-import 'package:screenshot_guard/src/pigeon_screenshot_guard.dart';
+import 'package:screenshot_shield/screenshot_shield.dart';
+import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
+import 'package:screenshot_shield/src/pigeon_screenshot_shield.dart';
 
-class _FakeScreenshotGuardPlatform extends ScreenshotGuardPlatform {
+class _FakeScreenshotShieldPlatform extends ScreenshotShieldPlatform {
   final controller = StreamController<void>.broadcast();
   final calls = <String>[];
 
@@ -28,20 +28,20 @@ class _FakeScreenshotGuardPlatform extends ScreenshotGuardPlatform {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('ScreenshotGuardPlatform.instance', () {
+  group('ScreenshotShieldPlatform.instance', () {
     test('defaults to the Pigeon implementation', () {
-      expect(ScreenshotGuardPlatform.instance, isA<PigeonScreenshotGuard>());
+      expect(ScreenshotShieldPlatform.instance, isA<PigeonScreenshotShield>());
     });
   });
 
-  group('ScreenshotGuard', () {
-    late _FakeScreenshotGuardPlatform fakePlatform;
-    late ScreenshotGuard screenshotGuard;
+  group('ScreenshotShield', () {
+    late _FakeScreenshotShieldPlatform fakePlatform;
+    late ScreenshotShield screenshotGuard;
 
     setUp(() {
-      fakePlatform = _FakeScreenshotGuardPlatform();
-      ScreenshotGuardPlatform.instance = fakePlatform;
-      screenshotGuard = ScreenshotGuard();
+      fakePlatform = _FakeScreenshotShieldPlatform();
+      ScreenshotShieldPlatform.instance = fakePlatform;
+      screenshotGuard = ScreenshotShield();
     });
 
     tearDown(() async {

@@ -1,16 +1,16 @@
 import 'dart:async';
 
-import 'package:screenshot_guard/screenshot_guard_platform_interface.dart';
-import 'package:screenshot_guard/src/screenshot_guard_messages.dart' as messages;
+import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
+import 'package:screenshot_shield/src/screenshot_shield_messages.dart' as messages;
 
-/// An implementation of [ScreenshotGuardPlatform] that uses Pigeon-generated
+/// An implementation of [ScreenshotShieldPlatform] that uses Pigeon-generated
 /// message channels to talk to the host platform.
-class PigeonScreenshotGuard extends ScreenshotGuardPlatform {
-  PigeonScreenshotGuard({messages.ScreenshotGuardHostApi? hostApi, Stream<int> Function()? eventStream})
-    : _hostApi = hostApi ?? messages.ScreenshotGuardHostApi(),
+class PigeonScreenshotShield extends ScreenshotShieldPlatform {
+  PigeonScreenshotShield({messages.ScreenshotShieldHostApi? hostApi, Stream<int> Function()? eventStream})
+    : _hostApi = hostApi ?? messages.ScreenshotShieldHostApi(),
       _eventStream = eventStream ?? messages.onScreenshotDetected;
 
-  final messages.ScreenshotGuardHostApi _hostApi;
+  final messages.ScreenshotShieldHostApi _hostApi;
   final Stream<int> Function() _eventStream;
 
   late final _events = _eventStream();

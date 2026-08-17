@@ -1,4 +1,4 @@
-import 'package:screenshot_guard/screenshot_guard_platform_interface.dart';
+import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
 
 /// Guards a screen against being captured by the user.
 ///
@@ -8,10 +8,10 @@ import 'package:screenshot_guard/screenshot_guard_platform_interface.dart';
 /// Screenshot detection is best-effort: on Android it is reported shortly
 /// after the screenshot is saved to the media store, on iOS it is reported
 /// shortly after the screenshot is saved to the photo library.
-class ScreenshotGuard {
-  ScreenshotGuard({ScreenshotGuardPlatform? platform}) : _platform = platform ?? ScreenshotGuardPlatform.instance;
+class ScreenshotShield {
+  ScreenshotShield({ScreenshotShieldPlatform? platform}) : _platform = platform ?? ScreenshotShieldPlatform.instance;
 
-  final ScreenshotGuardPlatform _platform;
+  final ScreenshotShieldPlatform _platform;
 
   /// Emits an event each time the user captures a screenshot.
   Stream<void> get onScreenshotDetected => _platform.onScreenshotDetected;

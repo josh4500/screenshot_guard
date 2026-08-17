@@ -2,7 +2,7 @@
 // See also: https://pub.dev/packages/pigeon
 @file:Suppress("UNCHECKED_CAST", "ArrayInDataClass")
 
-package com.ajibolaak.screenshot_guard
+package com.ajibolaak.screenshot_shield
 
 import android.util.Log
 import io.flutter.plugin.common.BasicMessageChannel
@@ -13,7 +13,7 @@ import io.flutter.plugin.common.StandardMethodCodec
 import io.flutter.plugin.common.StandardMessageCodec
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
-private object ScreenshotGuardMessagesPigeonUtils {
+private object ScreenshotShieldMessagesPigeonUtils {
 
   fun wrapResult(result: Any?): List<Any?> {
     return listOf(result)
@@ -47,7 +47,7 @@ class FlutterError (
   override val message: String? = null,
   val details: Any? = null
 ) : RuntimeException()
-private open class ScreenshotGuardMessagesPigeonCodec : StandardMessageCodec() {
+private open class ScreenshotShieldMessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return     super.readValueOfType(type, buffer)
   }
@@ -56,36 +56,36 @@ private open class ScreenshotGuardMessagesPigeonCodec : StandardMessageCodec() {
   }
 }
 
-val ScreenshotGuardMessagesPigeonMethodCodec = StandardMethodCodec(ScreenshotGuardMessagesPigeonCodec())
+val ScreenshotShieldMessagesPigeonMethodCodec = StandardMethodCodec(ScreenshotShieldMessagesPigeonCodec())
 
 /**
  * Calls made from Dart into the host platform.
  *
  * Generated interface from Pigeon that represents a handler of messages from Flutter.
  */
-interface ScreenshotGuardHostApi {
+interface ScreenshotShieldHostApi {
   fun startListening()
   fun stopListening()
   fun setProtected(protected: Boolean)
 
   companion object {
-    /** The codec used by ScreenshotGuardHostApi. */
+    /** The codec used by ScreenshotShieldHostApi. */
     val codec: MessageCodec<Any?> by lazy {
-      ScreenshotGuardMessagesPigeonCodec()
+      ScreenshotShieldMessagesPigeonCodec()
     }
-    /** Sets up an instance of `ScreenshotGuardHostApi` to handle messages through the `binaryMessenger`. */
+    /** Sets up an instance of `ScreenshotShieldHostApi` to handle messages through the `binaryMessenger`. */
     @JvmOverloads
-    fun setUp(binaryMessenger: BinaryMessenger, api: ScreenshotGuardHostApi?, messageChannelSuffix: String = "") {
+    fun setUp(binaryMessenger: BinaryMessenger, api: ScreenshotShieldHostApi?, messageChannelSuffix: String = "") {
       val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.startListening$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.startListening$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { _, reply ->
             val wrapped: List<Any?> = try {
               api.startListening()
               listOf(null)
             } catch (exception: Throwable) {
-              ScreenshotGuardMessagesPigeonUtils.wrapError(exception)
+              ScreenshotShieldMessagesPigeonUtils.wrapError(exception)
             }
             reply.reply(wrapped)
           }
@@ -94,14 +94,14 @@ interface ScreenshotGuardHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.stopListening$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.stopListening$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { _, reply ->
             val wrapped: List<Any?> = try {
               api.stopListening()
               listOf(null)
             } catch (exception: Throwable) {
-              ScreenshotGuardMessagesPigeonUtils.wrapError(exception)
+              ScreenshotShieldMessagesPigeonUtils.wrapError(exception)
             }
             reply.reply(wrapped)
           }
@@ -110,7 +110,7 @@ interface ScreenshotGuardHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.setProtected$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setProtected$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -119,7 +119,7 @@ interface ScreenshotGuardHostApi {
               api.setProtected(protectedArg)
               listOf(null)
             } catch (exception: Throwable) {
-              ScreenshotGuardMessagesPigeonUtils.wrapError(exception)
+              ScreenshotShieldMessagesPigeonUtils.wrapError(exception)
             }
             reply.reply(wrapped)
           }
@@ -131,8 +131,8 @@ interface ScreenshotGuardHostApi {
   }
 }
 
-private class ScreenshotGuardMessagesPigeonStreamHandler<T>(
-    val wrapper: ScreenshotGuardMessagesPigeonEventChannelWrapper<T>
+private class ScreenshotShieldMessagesPigeonStreamHandler<T>(
+    val wrapper: ScreenshotShieldMessagesPigeonEventChannelWrapper<T>
 ) : EventChannel.StreamHandler {
   var pigeonSink: PigeonEventSink<T>? = null
 
@@ -147,7 +147,7 @@ private class ScreenshotGuardMessagesPigeonStreamHandler<T>(
   }
 }
 
-interface ScreenshotGuardMessagesPigeonEventChannelWrapper<T> {
+interface ScreenshotShieldMessagesPigeonEventChannelWrapper<T> {
   open fun onListen(p0: Any?, sink: PigeonEventSink<T>) {}
 
   open fun onCancel(p0: Any?) {}
@@ -168,18 +168,18 @@ class PigeonEventSink<T>(private val sink: EventChannel.EventSink) {
 }
       
 /** Events emitted from the host platform into Dart. */
-abstract class OnScreenshotDetectedStreamHandler : ScreenshotGuardMessagesPigeonEventChannelWrapper<Long> {
+abstract class OnScreenshotDetectedStreamHandler : ScreenshotShieldMessagesPigeonEventChannelWrapper<Long> {
   companion object {
     fun register(messenger: BinaryMessenger, streamHandler: OnScreenshotDetectedStreamHandler, instanceName: String = "") {
-      var channelName: String = "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardEventChannelApi.onScreenshotDetected"
+      var channelName: String = "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldEventChannelApi.onScreenshotDetected"
       if (instanceName.isNotEmpty()) {
         channelName += ".$instanceName"
       }
-      val internalStreamHandler = ScreenshotGuardMessagesPigeonStreamHandler<Long>(streamHandler)
-      EventChannel(messenger, channelName, ScreenshotGuardMessagesPigeonMethodCodec).setStreamHandler(internalStreamHandler)
+      val internalStreamHandler = ScreenshotShieldMessagesPigeonStreamHandler<Long>(streamHandler)
+      EventChannel(messenger, channelName, ScreenshotShieldMessagesPigeonMethodCodec).setStreamHandler(internalStreamHandler)
     }
   }
-// Implement methods from ScreenshotGuardMessagesPigeonEventChannelWrapper
+// Implement methods from ScreenshotShieldMessagesPigeonEventChannelWrapper
 override fun onListen(p0: Any?, sink: PigeonEventSink<Long>) {}
 
 override fun onCancel(p0: Any?) {}

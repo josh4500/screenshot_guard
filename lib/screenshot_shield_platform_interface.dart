@@ -1,25 +1,25 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
-import 'package:screenshot_guard/src/pigeon_screenshot_guard.dart';
+import 'package:screenshot_shield/src/pigeon_screenshot_shield.dart';
 
-/// The interface that platform implementations of `screenshot_guard` must
+/// The interface that platform implementations of `screenshot_shield` must
 /// extend.
-abstract class ScreenshotGuardPlatform extends PlatformInterface {
-  /// Constructs a [ScreenshotGuardPlatform].
-  ScreenshotGuardPlatform() : super(token: _token);
+abstract class ScreenshotShieldPlatform extends PlatformInterface {
+  /// Constructs a [ScreenshotShieldPlatform].
+  ScreenshotShieldPlatform() : super(token: _token);
 
   static final _token = Object();
 
-  static ScreenshotGuardPlatform _instance = PigeonScreenshotGuard();
+  static ScreenshotShieldPlatform _instance = PigeonScreenshotShield();
 
-  /// The default instance of [ScreenshotGuardPlatform] to use.
+  /// The default instance of [ScreenshotShieldPlatform] to use.
   ///
-  /// Defaults to [PigeonScreenshotGuard].
-  static ScreenshotGuardPlatform get instance => _instance;
+  /// Defaults to [PigeonScreenshotShield].
+  static ScreenshotShieldPlatform get instance => _instance;
 
   /// Platform-specific implementations should set this with their own
-  /// platform-specific class that extends [ScreenshotGuardPlatform] when
+  /// platform-specific class that extends [ScreenshotShieldPlatform] when
   /// they register themselves.
-  static set instance(ScreenshotGuardPlatform instance) {
+  static set instance(ScreenshotShieldPlatform instance) {
     PlatformInterface.verifyToken(instance, _token);
     _instance = instance;
   }

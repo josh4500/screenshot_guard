@@ -2,22 +2,22 @@ import Flutter
 import UIKit
 import Photos
 
-public class ScreenshotGuardPlugin: NSObject, FlutterPlugin, ScreenshotGuardHostApi, PHPhotoLibraryChangeObserver {
+public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHostApi, PHPhotoLibraryChangeObserver {
     private static let screenshotCreationWindow: TimeInterval = 5
     private static let sizeTolerance: CGFloat = 8
 
-    private let streamHandler = ScreenshotGuardStreamHandler()
+    private let streamHandler = ScreenshotShieldStreamHandler()
     private var assetFetchResult: PHFetchResult<PHAsset>?
     private var isObserving = false
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let messenger = registrar.messenger()
-        let instance = ScreenshotGuardPlugin()
-        ScreenshotGuardHostApiSetup.setUp(binaryMessenger: messenger, api: instance)
+        let instance = ScreenshotShieldPlugin()
+        ScreenshotShieldHostApiSetup.setUp(binaryMessenger: messenger, api: instance)
         OnScreenshotDetectedStreamHandler.register(with: messenger, streamHandler: instance.streamHandler)
     }
 
-    // MARK: - ScreenshotGuardHostApi
+    // MARK: - ScreenshotShieldHostApi
 
     public func startListening() throws {
         guard !isObserving else { return }
@@ -99,7 +99,7 @@ public class ScreenshotGuardPlugin: NSObject, FlutterPlugin, ScreenshotGuardHost
     }
 }
 
-class ScreenshotGuardStreamHandler: OnScreenshotDetectedStreamHandler {
+class ScreenshotShieldStreamHandler: OnScreenshotDetectedStreamHandler {
     private var eventSink: PigeonEventSink<Int64>?
 
     override func onListen(withArguments arguments: Any?, sink: PigeonEventSink<Int64>) {

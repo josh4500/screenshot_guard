@@ -1,4 +1,4 @@
-package com.ajibolaak.screenshot_guard
+package com.ajibolaak.screenshot_shield
 
 import android.content.ContentResolver
 import android.database.ContentObserver

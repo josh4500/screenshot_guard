@@ -1,1 +1,1 @@
-rootProject.name = "screenshot_guard"
+rootProject.name = "screenshot_shield"

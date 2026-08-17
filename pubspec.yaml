@@ -1,7 +1,8 @@
-name: screenshot_guard
+name: screenshot_shield
 description: Detect user screenshots and optionally prevent screen capture on Android and iOS.
 version: 0.1.0
-publish_to: none
+repository: https://github.com/josh4500/screenshot_guard
+homepage: https://github.com/josh4500/screenshot_guard
 
 environment:
   sdk: ">=3.12.2 <4.0.0"
@@ -23,10 +24,10 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.ajibolaak.screenshot_guard
-        pluginClass: ScreenshotGuardPlugin
+        package: com.ajibolaak.screenshot_shield
+        pluginClass: ScreenshotShieldPlugin
       ios:
-        pluginClass: ScreenshotGuardPlugin
+        pluginClass: ScreenshotShieldPlugin
 
 platforms:
   android:

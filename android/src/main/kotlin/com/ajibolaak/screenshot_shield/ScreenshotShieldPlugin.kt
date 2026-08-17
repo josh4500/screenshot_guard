@@ -1,4 +1,4 @@
-package com.ajibolaak.screenshot_guard
+package com.ajibolaak.screenshot_shield
 
 import android.app.Activity
 import android.content.Context
@@ -9,27 +9,27 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 
 /** Detects user screenshots and optionally prevents screen capture. */
-class ScreenshotGuardPlugin :
+class ScreenshotShieldPlugin :
     FlutterPlugin,
     ActivityAware,
-    ScreenshotGuardHostApi {
+    ScreenshotShieldHostApi {
 
     private var applicationContext: Context? = null
     private var activity: Activity? = null
     private var contentObserver: ScreenshotContentObserver? = null
     private var lastScreenshotName: String? = null
-    private val streamHandler = ScreenshotGuardStreamHandler()
+    private val streamHandler = ScreenshotShieldStreamHandler()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = flutterPluginBinding.applicationContext
         val messenger = flutterPluginBinding.binaryMessenger
-        ScreenshotGuardHostApi.setUp(messenger, this)
+        ScreenshotShieldHostApi.setUp(messenger, this)
         OnScreenshotDetectedStreamHandler.register(messenger, streamHandler)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         stopObserving()
-        ScreenshotGuardHostApi.setUp(binding.binaryMessenger, null)
+        ScreenshotShieldHostApi.setUp(binding.binaryMessenger, null)
         contentObserver = null
         applicationContext = null
         activity = null
@@ -95,7 +95,7 @@ class ScreenshotGuardPlugin :
     }
 }
 
-private class ScreenshotGuardStreamHandler : OnScreenshotDetectedStreamHandler() {
+private class ScreenshotShieldStreamHandler : OnScreenshotDetectedStreamHandler() {
     private var eventSink: PigeonEventSink<Long>? = null
 
     override fun onListen(arguments: Any?, sink: PigeonEventSink<Long>) {

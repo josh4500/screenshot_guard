@@ -50,11 +50,11 @@ class _PigeonCodec extends StandardMessageCodec {
 const StandardMethodCodec pigeonMethodCodec = StandardMethodCodec(_PigeonCodec());
 
 /// Calls made from Dart into the host platform.
-class ScreenshotGuardHostApi {
-  /// Constructor for [ScreenshotGuardHostApi]. The [binaryMessenger] named argument is
+class ScreenshotShieldHostApi {
+  /// Constructor for [ScreenshotShieldHostApi]. The [binaryMessenger] named argument is
   /// available for dependency injection. If it is left null, the default
   /// BinaryMessenger will be used which routes to the host platform.
-  ScreenshotGuardHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
+  ScreenshotShieldHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
     : pigeonVar_binaryMessenger = binaryMessenger,
       pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
   final BinaryMessenger? pigeonVar_binaryMessenger;
@@ -65,7 +65,7 @@ class ScreenshotGuardHostApi {
 
   Future<void> startListening() async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.startListening$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.startListening$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -79,7 +79,7 @@ class ScreenshotGuardHostApi {
 
   Future<void> stopListening() async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.stopListening$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.stopListening$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -93,7 +93,7 @@ class ScreenshotGuardHostApi {
 
   Future<void> setProtected(bool protected) async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.setProtected$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setProtected$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -118,7 +118,7 @@ Stream<int> onScreenshotDetected({String instanceName = ''}) {
     instanceName = '.$instanceName';
   }
   final EventChannel onScreenshotDetectedChannel = EventChannel(
-    'dev.flutter.pigeon.screenshot_guard.ScreenshotGuardEventChannelApi.onScreenshotDetected$instanceName',
+    'dev.flutter.pigeon.screenshot_shield.ScreenshotShieldEventChannelApi.onScreenshotDetected$instanceName',
     pigeonMethodCodec,
   );
   return onScreenshotDetectedChannel.receiveBroadcastStream().map((dynamic event) {

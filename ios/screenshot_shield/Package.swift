@@ -4,19 +4,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "screenshot_guard",
+    name: "screenshot_shield",
     platforms: [
         .iOS("13.0")
     ],
     products: [
-        .library(name: "screenshot-guard", targets: ["screenshot_guard"])
+        .library(name: "screenshot-guard", targets: ["screenshot_shield"])
     ],
     dependencies: [
         .package(name: "FlutterFramework", path: "../FlutterFramework")
     ],
     targets: [
         .target(
-            name: "screenshot_guard",
+            name: "screenshot_shield",
             dependencies: [
                 .product(name: "FlutterFramework", package: "FlutterFramework")
             ],

@@ -55,7 +55,7 @@ private func wrapError(_ error: Any) -> [Any?] {
   ]
 }
 
-enum ScreenshotGuardMessagesPigeonInternal {
+enum ScreenshotShieldMessagesPigeonInternal {
   static func isNullish(_ value: Any?) -> Bool {
     guard let innerValue = value else {
       return true
@@ -75,44 +75,44 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
 }
 
 
-private class ScreenshotGuardMessagesPigeonCodecReader: FlutterStandardReader {
+private class ScreenshotShieldMessagesPigeonCodecReader: FlutterStandardReader {
 }
 
-private class ScreenshotGuardMessagesPigeonCodecWriter: FlutterStandardWriter {
+private class ScreenshotShieldMessagesPigeonCodecWriter: FlutterStandardWriter {
 }
 
-private class ScreenshotGuardMessagesPigeonCodecReaderWriter: FlutterStandardReaderWriter {
+private class ScreenshotShieldMessagesPigeonCodecReaderWriter: FlutterStandardReaderWriter {
   override func reader(with data: Data) -> FlutterStandardReader {
-    return ScreenshotGuardMessagesPigeonCodecReader(data: data)
+    return ScreenshotShieldMessagesPigeonCodecReader(data: data)
   }
 
   override func writer(with data: NSMutableData) -> FlutterStandardWriter {
-    return ScreenshotGuardMessagesPigeonCodecWriter(data: data)
+    return ScreenshotShieldMessagesPigeonCodecWriter(data: data)
   }
 }
 
-class ScreenshotGuardMessagesPigeonCodec: FlutterStandardMessageCodec, @unchecked Sendable {
-  static let shared = ScreenshotGuardMessagesPigeonCodec(readerWriter: ScreenshotGuardMessagesPigeonCodecReaderWriter())
+class ScreenshotShieldMessagesPigeonCodec: FlutterStandardMessageCodec, @unchecked Sendable {
+  static let shared = ScreenshotShieldMessagesPigeonCodec(readerWriter: ScreenshotShieldMessagesPigeonCodecReaderWriter())
 }
 
-var screenshotGuardMessagesPigeonMethodCodec = FlutterStandardMethodCodec(readerWriter: ScreenshotGuardMessagesPigeonCodecReaderWriter());
+var screenshotShieldMessagesPigeonMethodCodec = FlutterStandardMethodCodec(readerWriter: ScreenshotShieldMessagesPigeonCodecReaderWriter());
 
 /// Calls made from Dart into the host platform.
 ///
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
-protocol ScreenshotGuardHostApi {
+protocol ScreenshotShieldHostApi {
   func startListening() throws
   func stopListening() throws
   func setProtected(protected: Bool) throws
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
-class ScreenshotGuardHostApiSetup {
-  static var codec: FlutterStandardMessageCodec { ScreenshotGuardMessagesPigeonCodec.shared }
-  /// Sets up an instance of `ScreenshotGuardHostApi` to handle messages through the `binaryMessenger`.
-  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: ScreenshotGuardHostApi?, messageChannelSuffix: String = "") {
+class ScreenshotShieldHostApiSetup {
+  static var codec: FlutterStandardMessageCodec { ScreenshotShieldMessagesPigeonCodec.shared }
+  /// Sets up an instance of `ScreenshotShieldHostApi` to handle messages through the `binaryMessenger`.
+  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: ScreenshotShieldHostApi?, messageChannelSuffix: String = "") {
     let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
-    let startListeningChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.startListening\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let startListeningChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.startListening\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       startListeningChannel.setMessageHandler { _, reply in
         do {
@@ -125,7 +125,7 @@ class ScreenshotGuardHostApiSetup {
     } else {
       startListeningChannel.setMessageHandler(nil)
     }
-    let stopListeningChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.stopListening\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let stopListeningChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.stopListening\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       stopListeningChannel.setMessageHandler { _, reply in
         do {
@@ -138,7 +138,7 @@ class ScreenshotGuardHostApiSetup {
     } else {
       stopListeningChannel.setMessageHandler(nil)
     }
-    let setProtectedChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardHostApi.setProtected\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let setProtectedChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setProtected\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       setProtectedChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -210,12 +210,12 @@ class OnScreenshotDetectedStreamHandler: PigeonEventChannelWrapper<Int64> {
   static func register(with messenger: FlutterBinaryMessenger,
                       instanceName: String = "",
                       streamHandler: OnScreenshotDetectedStreamHandler) {
-    var channelName = "dev.flutter.pigeon.screenshot_guard.ScreenshotGuardEventChannelApi.onScreenshotDetected"
+    var channelName = "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldEventChannelApi.onScreenshotDetected"
     if !instanceName.isEmpty {
       channelName += ".\(instanceName)"
     }
     let internalStreamHandler = PigeonStreamHandler<Int64>(wrapper: streamHandler)
-    let channel = FlutterEventChannel(name: channelName, binaryMessenger: messenger, codec: screenshotGuardMessagesPigeonMethodCodec)
+    let channel = FlutterEventChannel(name: channelName, binaryMessenger: messenger, codec: screenshotShieldMessagesPigeonMethodCodec)
     channel.setStreamHandler(internalStreamHandler)
   }
 }

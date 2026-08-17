@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:screenshot_guard/src/pigeon_screenshot_guard.dart';
-import 'package:screenshot_guard/src/screenshot_guard_messages.dart';
+import 'package:screenshot_shield/src/pigeon_screenshot_shield.dart';
+import 'package:screenshot_shield/src/screenshot_shield_messages.dart';
 
-class _FakeHostApi extends ScreenshotGuardHostApi {
+class _FakeHostApi extends ScreenshotShieldHostApi {
   final calls = <String>[];
 
   @override
@@ -20,10 +20,10 @@ class _FakeHostApi extends ScreenshotGuardHostApi {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('PigeonScreenshotGuard', () {
+  group('PigeonScreenshotShield', () {
     test('forwards startListening to the host api', () async {
       final hostApi = _FakeHostApi();
-      final platform = PigeonScreenshotGuard(hostApi: hostApi);
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
 
       await platform.startListening();
 
@@ -32,7 +32,7 @@ void main() {
 
     test('forwards stopListening to the host api', () async {
       final hostApi = _FakeHostApi();
-      final platform = PigeonScreenshotGuard(hostApi: hostApi);
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
 
       await platform.stopListening();
 
@@ -41,7 +41,7 @@ void main() {
 
     test('forwards setProtected to the host api', () async {
       final hostApi = _FakeHostApi();
-      final platform = PigeonScreenshotGuard(hostApi: hostApi);
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
 
       await platform.setProtected(protected: true);
 
@@ -50,7 +50,7 @@ void main() {
 
     test('forwards events from the event channel', () async {
       final controller = StreamController<int>.broadcast();
-      final platform = PigeonScreenshotGuard(eventStream: () => controller.stream);
+      final platform = PigeonScreenshotShield(eventStream: () => controller.stream);
       final events = <void>[];
       final subscription = platform.onScreenshotDetected.listen(events.add);
 

@@ -1,4 +1,4 @@
-group = "com.ajibolaak.screenshot_guard"
+group = "com.ajibolaak.screenshot_shield"
 version = "1.0-SNAPSHOT"
 
 buildscript {
@@ -26,7 +26,7 @@ plugins {
 }
 
 android {
-    namespace = "com.ajibolaak.screenshot_guard"
+    namespace = "com.ajibolaak.screenshot_shield"
 
     compileSdk = 36
 

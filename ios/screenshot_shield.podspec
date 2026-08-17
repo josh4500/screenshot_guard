@@ -1,15 +1,15 @@
 Pod::Spec.new do |s|
-  s.name             = 'screenshot_guard'
+  s.name             = 'screenshot_shield'
   s.version          = '0.1.0'
   s.summary          = 'Detect user screenshots and optionally prevent screen capture on Android and iOS.'
   s.description      = <<-DESC
 Detect user screenshots and optionally prevent screen capture on Android and iOS.
                        DESC
-  s.homepage         = "https://github.com/ajibolaak/screenshot_guard"
+  s.homepage         = "https://github.com/josh4500/screenshot_shield"
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Ajibola Ak' => 'ajibolaak@users.noreply.github.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'screenshot_guard/Sources/screenshot_guard/**/*'
+  s.source_files = 'screenshot_shield/Sources/screenshot_shield/**/*'
   s.dependency 'Flutter'
   s.platform = :ios, '13.0'
 
