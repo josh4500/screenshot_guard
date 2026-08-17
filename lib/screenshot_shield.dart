@@ -10,7 +10,7 @@ export 'src/screenshot_shield_scope.dart';
 ///
 /// Screenshot detection is best-effort: on Android it is reported shortly
 /// after the screenshot is saved to the media store, on iOS it is reported
-/// shortly after the screenshot is saved to the photo library.
+/// immediately when the screenshot is taken.
 class ScreenshotShield {
   ScreenshotShield({ScreenshotShieldPlatform? platform}) : _platform = platform ?? ScreenshotShieldPlatform.instance;
 
@@ -20,9 +20,6 @@ class ScreenshotShield {
   Stream<void> get onScreenshotDetected => _platform.onScreenshotDetected;
 
   /// Starts observing for screenshots.
-  ///
-  /// On iOS this prompts the user for photo library access the first time it
-  /// is called.
   Future<void> startListening() => _platform.startListening();
 
   /// Stops observing for screenshots.

@@ -9,10 +9,10 @@ Screenshot detection is best-effort and platform-specific:
 
 | Capability | Android | iOS |
 |---|---|---|
-| Screenshot detection | Yes - watches the media store and reports shortly after a screenshot is saved to `DCIM/Screenshots` | Yes - observes the photo library for newly saved images matching the screen size and reports shortly after the screenshot is saved |
+| Screenshot detection | Yes - watches the media store and reports shortly after a screenshot is saved to `DCIM/Screenshots` | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
 | Prevent screen capture (`setProtected(true)`) | Yes - adds the secure window flag so the captured frame is blank | No - no public API to prevent screenshots; it is a no-op |
 | Screenshot events while protected | No - the blanked capture is never saved, so no event fires | N/A - protection is not supported |
-| Runtime permission | Not required | Photo library access, prompted on the first `startListening()` call |
+| Runtime permission | Not required | Not required |
 
 ## Usage
 
@@ -81,14 +81,10 @@ detection events will not fire.
 
 ## iOS configuration
 
-The iOS implementation uses `Photos.framework` to detect screenshots and
-requests photo library access on the first `startListening()` call. Add the
-following to the host app's `Info.plist`:
-
-```xml
-<key>NSPhotoLibraryUsageDescription</key>
-<string>Used to detect screenshots and offer an official shareable image.</string>
-```
+The iOS implementation observes `UIApplicationUserDidTakeScreenshotNotification`
+and requires no permissions or `Info.plist` entries. Screenshot detection fires
+while the app is in the foreground; screenshots taken while the app is
+backgrounded (e.g. from the app switcher) are not reported.
 
 ## Install
 

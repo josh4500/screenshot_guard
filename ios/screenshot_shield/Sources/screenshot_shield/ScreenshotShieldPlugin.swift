@@ -1,14 +1,9 @@
 import Flutter
 import UIKit
-import Photos
 
-public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHostApi, PHPhotoLibraryChangeObserver {
-    private static let screenshotCreationWindow: TimeInterval = 5
-    private static let sizeTolerance: CGFloat = 8
-
+public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHostApi {
     private let streamHandler = ScreenshotShieldStreamHandler()
-    private var assetFetchResult: PHFetchResult<PHAsset>?
-    private var isObserving = false
+    private var screenshotObserver: NSObjectProtocol?
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let messenger = registrar.messenger()
@@ -20,81 +15,30 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     // MARK: - ScreenshotShieldHostApi
 
     public func startListening() throws {
-        guard !isObserving else { return }
-        requestPhotoLibraryAccess { [weak self] granted in
-            guard let self, granted else { return }
-            self.beginObserving()
+        guard screenshotObserver == nil else { return }
+        screenshotObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.userDidTakeScreenshotNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.streamHandler.emitScreenshotDetected()
         }
     }
 
     public func stopListening() throws {
-        stopObserving()
+        if let screenshotObserver {
+            NotificationCenter.default.removeObserver(screenshotObserver)
+            self.screenshotObserver = nil
+        }
     }
 
     public func setProtected(protected: Bool) throws {
         // iOS has no public API to prevent screenshots, so this is a no-op.
     }
 
-    // MARK: - Private
-
-    private func requestPhotoLibraryAccess(completion: @escaping (Bool) -> Void) {
-        if #available(iOS 14, *) {
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
-                completion(status == .authorized || status == .limited)
-            }
-        } else {
-            PHPhotoLibrary.requestAuthorization { status in
-                completion(status == .authorized)
-            }
-        }
-    }
-
-    private func beginObserving() {
-        guard !isObserving else { return }
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        assetFetchResult = PHAsset.fetchAssets(with: .image, options: options)
-        isObserving = true
-        PHPhotoLibrary.shared().register(self)
-    }
-
-    private func stopObserving() {
-        guard isObserving else { return }
-        PHPhotoLibrary.shared().unregisterChangeObserver(self)
-        assetFetchResult = nil
-        isObserving = false
-    }
-
-    private func isScreenshot(_ asset: PHAsset) -> Bool {
-        guard
-            asset.mediaType == .image,
-            let creationDate = asset.creationDate,
-            Date().timeIntervalSince(creationDate) < Self.screenshotCreationWindow
-        else {
-            return false
-        }
-        let screenSize = UIScreen.main.nativeBounds.size
-        let assetSize = CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
-        let matchesPortrait = abs(assetSize.width - screenSize.width) < Self.sizeTolerance
-            && abs(assetSize.height - screenSize.height) < Self.sizeTolerance
-        let matchesLandscape = abs(assetSize.width - screenSize.height) < Self.sizeTolerance
-            && abs(assetSize.height - screenSize.width) < Self.sizeTolerance
-        return matchesPortrait || matchesLandscape
-    }
-
-    // MARK: - PHPhotoLibraryChangeObserver
-
-    public func photoLibraryDidChange(_ changeInstance: PHChange) {
-        guard
-            let assetFetchResult,
-            let changes = changeInstance.changeDetails(for: assetFetchResult),
-            !changes.insertedObjects.isEmpty
-        else {
-            return
-        }
-        for asset in changes.insertedObjects where isScreenshot(asset) {
-            streamHandler.emitScreenshotDetected()
-            return
+    deinit {
+        if let screenshotObserver {
+            NotificationCenter.default.removeObserver(screenshotObserver)
         }
     }
 }
