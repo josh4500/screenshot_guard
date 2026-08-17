@@ -1,0 +1,15 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - pigeons/**
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - require_trailing_commas
+    - sort_child_properties_last
+    - unawaited_futures
+
+formatter:
+  page_width: 120
