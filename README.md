@@ -1,4 +1,4 @@
-# screenshot_guard
+# screenshot_shield
 
 Detects user screenshots and optionally prevents screen capture on Android and
 iOS.
@@ -17,17 +17,17 @@ Screenshot detection is best-effort and platform-specific:
 ## Usage
 
 ```dart
-final screenshotGuard = ScreenshotGuard();
-screenshotGuard.onScreenshotDetected.listen((_) {
+final shield = ScreenshotShield();
+shield.onScreenshotDetected.listen((_) {
   // Show your own shareable image here.
 });
 
 // While this screen is visible:
-await screenshotGuard.startListening();
-await screenshotGuard.setProtected(true); // Android only: blanks the capture.
+await shield.startListening();
+await shield.setProtected(true); // Android only: blanks the capture.
 
 // When leaving the screen:
-await screenshotGuard.stopListening();
+await shield.stopListening();
 ```
 
 When a screenshot is detected, present the user with your own shareable image
@@ -52,17 +52,17 @@ Add the dependency to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  screenshot_guard: ^0.1.0
+  screenshot_shield: ^0.1.0
 ```
 
 ## Development
 
 The Dart-to-native plumbing is generated with
 [Pigeon](https://pub.dev/packages/pigeon) from
-`pigeons/screenshot_guard.dart`. After changing that file, regenerate with:
+`pigeons/screenshot_shield.dart`. After changing that file, regenerate with:
 
 ```sh
-dart run pigeon --input pigeons/screenshot_guard.dart
+dart run pigeon --input pigeons/screenshot_shield.dart
 ```
 
 The generated Dart, Kotlin and Swift files are committed.
