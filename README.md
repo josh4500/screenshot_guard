@@ -97,24 +97,3 @@ Add the dependency to your `pubspec.yaml`:
 dependencies:
   screenshot_shield: ^0.1.0
 ```
-
-## Development
-
-The Dart-to-native plumbing is generated with
-[Pigeon](https://pub.dev/packages/pigeon) from
-`pigeons/screenshot_shield.dart`. After changing that file, regenerate with:
-
-```sh
-dart run pigeon --input pigeons/screenshot_shield.dart
-```
-
-The generated Dart, Kotlin and Swift files are committed.
-
-## Publishing
-
-To publish to [pub.dev](https://pub.dev), remove `publish_to: none` from
-`pubspec.yaml`, set a `repository:` pointing at your GitHub repo, then run:
-
-```sh
-flutter pub publish --dry-run
-```
