@@ -7,12 +7,12 @@ iOS.
 
 Screenshot detection is best-effort and platform-specific:
 
-- **Android** watches the media store and reports shortly after a screenshot is
-  saved to `DCIM/Screenshots`.
-- **iOS** observes the photo library for newly saved images that match the
-  device screen size and reports shortly after the screenshot is saved.
-- On iOS there is **no public API to prevent screenshots**; calling
-  `setProtected(true)` on iOS is a no-op.
+| Capability | Android | iOS |
+|---|---|---|
+| Screenshot detection | Yes - watches the media store and reports shortly after a screenshot is saved to `DCIM/Screenshots` | Yes - observes the photo library for newly saved images matching the screen size and reports shortly after the screenshot is saved |
+| Prevent screen capture (`setProtected(true)`) | Yes - adds the secure window flag so the captured frame is blank | No - no public API to prevent screenshots; it is a no-op |
+| Screenshot events while protected | No - the blanked capture is never saved, so no event fires | N/A - protection is not supported |
+| Runtime permission | Not required | Photo library access, prompted on the first `startListening()` call |
 
 ## Usage
 
