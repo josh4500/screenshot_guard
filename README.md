@@ -17,6 +17,7 @@ Screenshot detection is best-effort and platform-specific:
 On Android 14+, the system shows a notice whenever the screenshot detection
 API fires. Screenshots taken via ADB or instrumentation tests are not
 detected by either path.
+
 ## Usage
 
 Provide a `ScreenshotShield` to the tree with `ScreenshotShieldScope`, then
@@ -45,8 +46,9 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ScreenshotShieldRouteGuard(
-      onScreenshotDetected: () {
-        // Show your own shareable image here.
+      onScreenshotDetected: (image) {
+        // `image` is a PNG of the guarded screen (null if capture failed).
+        // Present it to the user, e.g. via `share_plus`.
       },
       child: const Scaffold(
         body: Center(child: Text('Guarded')),
@@ -59,7 +61,18 @@ class HomeScreen extends StatelessWidget {
 The guard reads its `ScreenshotShield` from the nearest `ScreenshotShieldScope`
 with `ScreenshotShieldScope.of(context)`. Configure the guard with a
 `preventCapture` flag (Android only, default `true`), a `detectScreenshots`
-flag (default `true`), and an optional `onScreenshotDetected` callback.
+flag (default `true`), a `captureOnScreenshot` flag (default `true`), and an
+optional `onScreenshotDetected` callback. With `captureOnScreenshot` the
+guarded subtree is re-rasterized into a PNG on each screenshot, so the app
+can show exactly what was on screen even when the OS frame is blanked or
+unavailable.
+
+### Detect-and-notify mode
+
+By default `preventCapture` blanks the captured frame on Android, so the user
+sees a black screenshot. To follow a Snapchat-style flow instead - let the
+screenshot succeed and react in `onScreenshotDetected` (for example by sending
+the captured image or notifying a peer) - set `preventCapture: false`.
 
 For lower-level control you can drive `ScreenshotShield` directly:
 

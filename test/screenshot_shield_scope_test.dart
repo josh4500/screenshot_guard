@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -50,9 +51,10 @@ class _ScopeReader extends StatelessWidget {
 Widget _buildApp({
   required ScreenshotShield shield,
   required RouteObserver<ModalRoute<void>> routeObserver,
-  required VoidCallback? onScreenshotDetected,
+  required ValueChanged<Uint8List?>? onScreenshotDetected,
   bool preventCapture = true,
   bool detectScreenshots = true,
+  bool captureOnScreenshot = true,
 }) {
   return ScreenshotShieldScope(
     shield: shield,
@@ -67,6 +69,7 @@ Widget _buildApp({
                 onScreenshotDetected: onScreenshotDetected,
                 preventCapture: preventCapture,
                 detectScreenshots: detectScreenshots,
+                captureOnScreenshot: captureOnScreenshot,
                 child: const Text('home'),
               ),
               TextButton(
@@ -148,7 +151,12 @@ void main() {
     testWidgets('invokes onScreenshotDetected while in view', (tester) async {
       var screenshots = 0;
       await tester.pumpWidget(
-        _buildApp(shield: shield, routeObserver: routeObserver, onScreenshotDetected: () => screenshots++),
+        _buildApp(
+          shield: shield,
+          routeObserver: routeObserver,
+          onScreenshotDetected: (_) => screenshots++,
+          captureOnScreenshot: false,
+        ),
       );
       await tester.pump();
 
@@ -158,10 +166,51 @@ void main() {
       expect(screenshots, 1);
     });
 
+    testWidgets('passes a PNG of the guarded subtree to onScreenshotDetected', (tester) async {
+      Uint8List? captured;
+      await tester.pumpWidget(
+        _buildApp(shield: shield, routeObserver: routeObserver, onScreenshotDetected: (image) => captured = image),
+      );
+      await tester.pump();
+
+      platform.controller.add(null);
+      for (var i = 0; i < 4; i++) {
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      }
+      await tester.pump();
+
+      expect(captured, isNotNull);
+      expect(captured!.isNotEmpty, isTrue);
+    });
+
+    testWidgets('passes null to onScreenshotDetected when captureOnScreenshot is false', (tester) async {
+      Uint8List? captured;
+      await tester.pumpWidget(
+        _buildApp(
+          shield: shield,
+          routeObserver: routeObserver,
+          onScreenshotDetected: (image) => captured = image,
+          captureOnScreenshot: false,
+        ),
+      );
+      await tester.pump();
+
+      platform.controller.add(null);
+      await tester.pump();
+
+      expect(captured, isNull);
+    });
+
     testWidgets('does not invoke onScreenshotDetected while covered', (tester) async {
       var screenshots = 0;
       await tester.pumpWidget(
-        _buildApp(shield: shield, routeObserver: routeObserver, onScreenshotDetected: () => screenshots++),
+        _buildApp(
+          shield: shield,
+          routeObserver: routeObserver,
+          onScreenshotDetected: (_) => screenshots++,
+          captureOnScreenshot: false,
+        ),
       );
 
       await tester.tap(find.text('push'));

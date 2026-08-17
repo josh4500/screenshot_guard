@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
 
@@ -9,6 +12,12 @@ import 'package:screenshot_shield/screenshot_shield.dart';
 /// listening for screenshots and (optionally) prevents capture. When another
 /// route is pushed on top the protection is released and listening stops, and
 /// both resume automatically when this route becomes visible again.
+///
+/// With [captureOnScreenshot] enabled the guarded subtree is wrapped in a
+/// [RepaintBoundary], and each detected screenshot is re-rasterized into a PNG
+/// that is passed to [onScreenshotDetected]. This captures the app's own
+/// content rather than the OS screenshot, so it works even on platforms or
+/// screens where the OS frame is blanked or unavailable.
 ///
 /// Only one [ScreenshotShieldRouteGuard] may be mounted per route; mounting a
 /// second one on the same route reports an error and is left inactive.
@@ -23,6 +32,7 @@ class ScreenshotShieldRouteGuard extends StatefulWidget {
     required this.child,
     this.preventCapture = true,
     this.detectScreenshots = true,
+    this.captureOnScreenshot = true,
     this.onScreenshotDetected,
   });
 
@@ -37,9 +47,17 @@ class ScreenshotShieldRouteGuard extends StatefulWidget {
   /// Defaults to `true`.
   final bool detectScreenshots;
 
+  /// Whether the guarded subtree is re-rasterized into a PNG when a screenshot
+  /// is detected. The PNG bytes are passed to [onScreenshotDetected]; set to
+  /// `false` to skip the capture overhead. Defaults to `true`.
+  final bool captureOnScreenshot;
+
   /// Invoked each time a screenshot is captured while the route is in view.
-  /// Use it to show your own shareable image instead of the captured frame.
-  final VoidCallback? onScreenshotDetected;
+  ///
+  /// The argument is a PNG-encoded image of the guarded subtree when
+  /// [captureOnScreenshot] is enabled, or `null` if the capture was skipped or
+  /// failed. Use it to show the user a shareable copy of the screen.
+  final ValueChanged<Uint8List?>? onScreenshotDetected;
 
   @override
   State<ScreenshotShieldRouteGuard> createState() => _ScreenshotShieldRouteGuardState();
@@ -52,6 +70,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   StreamSubscription<void>? _screenshotSubscription;
   RouteObserver<ModalRoute<void>>? _routeObserver;
   Route<dynamic>? _registeredRoute;
+  final GlobalKey _boundaryKey = GlobalKey();
   bool _inView = false;
 
   @override
@@ -119,11 +138,31 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
     }
     _shield = shield;
     _screenshotSubscription?.cancel();
-    _screenshotSubscription = shield.onScreenshotDetected.listen((_) {
-      if (_inView) {
-        widget.onScreenshotDetected?.call();
+    _screenshotSubscription = shield.onScreenshotDetected.listen((_) async {
+      if (!_inView) {
+        return;
       }
+      final image = widget.captureOnScreenshot ? await _captureChild() : null;
+      widget.onScreenshotDetected?.call(image);
     });
+  }
+
+  Future<Uint8List?> _captureChild() async {
+    final renderObject = _boundaryKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderRepaintBoundary) {
+      return null;
+    }
+    try {
+      final image = await renderObject.toImage(pixelRatio: MediaQuery.of(context).devicePixelRatio);
+      try {
+        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+        return byteData?.buffer.asUint8List();
+      } finally {
+        image.dispose();
+      }
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -162,7 +201,12 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    if (!widget.captureOnScreenshot) {
+      return widget.child;
+    }
+    return RepaintBoundary(key: _boundaryKey, child: widget.child);
+  }
 
   Future<void> _enterView() async {
     if (_inView) return;

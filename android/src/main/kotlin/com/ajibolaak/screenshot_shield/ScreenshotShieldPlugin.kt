@@ -30,7 +30,6 @@ class ScreenshotShieldPlugin :
     private var lifecycleObserver: LifecycleEventObserver? = null
     private var contentObserver: ScreenshotContentObserver? = null
     private var screenCaptureCallback: Activity.ScreenCaptureCallback? = null
-    private var lastScreenshotName: String? = null
     private var listening = false
     private var activityStarted = false
     private val streamHandler = ScreenshotShieldStreamHandler()
@@ -144,11 +143,8 @@ class ScreenshotShieldPlugin :
             return
         }
         if (contentObserver != null) return
-        contentObserver = ScreenshotContentObserver(context.contentResolver) { displayName ->
-            if (displayName != lastScreenshotName) {
-                lastScreenshotName = displayName
-                streamHandler.emitScreenshotDetected()
-            }
+        contentObserver = ScreenshotContentObserver(context.contentResolver) {
+            streamHandler.emitScreenshotDetected()
         }
         context.contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -161,7 +157,6 @@ class ScreenshotShieldPlugin :
         val observer = contentObserver ?: return
         applicationContext?.contentResolver?.unregisterContentObserver(observer)
         contentObserver = null
-        lastScreenshotName = null
     }
 
     private fun stopObserving() {

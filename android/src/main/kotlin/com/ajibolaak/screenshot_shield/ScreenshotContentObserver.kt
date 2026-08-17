@@ -11,64 +11,91 @@ import android.provider.MediaStore
 /**
  * Observes the media store for newly saved screenshots.
  *
- * Android stores screenshots in the `DCIM/Screenshots` directory, so any
- * inserted image whose display name or relative path contains "screenshot" is
- * reported to [onScreenshot].
+ * Android stores screenshots under a path whose name or directory contains a
+ * screenshot-like keyword (e.g. `DCIM/Screenshots/Screenshot_2024-...`), so any
+ * recently inserted image matching those keywords is reported to [onScreenshot].
+ *
+ * The media store can notify the observer several times for a single screenshot
+ * write, so events are debounced: reports are suppressed for [DEBOUNCE_MS]
+ * after a screenshot has already been classified.
  */
 internal class ScreenshotContentObserver(
     private val contentResolver: ContentResolver,
-    private val onScreenshot: (String) -> Unit,
+    private val onScreenshot: () -> Unit,
 ) : ContentObserver(Handler(Looper.getMainLooper())) {
+
+    private var lastScreenshotName: String? = null
+    private var lastScreenshotTime: Long = 0
 
     override fun onChange(selfChange: Boolean, uri: Uri?) {
         super.onChange(selfChange, uri)
         val screenshotUri = uri ?: return
-        queryScreenshots(screenshotUri).lastOrNull()?.let(onScreenshot)
+        val now = System.currentTimeMillis()
+        if (now - lastScreenshotTime < DEBOUNCE_MS) return
+        val name = queryScreenshotName(screenshotUri) ?: return
+        if (name == lastScreenshotName) return
+        lastScreenshotName = name
+        lastScreenshotTime = now
+        onScreenshot()
     }
 
-    private fun queryScreenshots(uri: Uri): List<String> {
+    private fun queryScreenshotName(uri: Uri): String? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            queryScreenshotNames(uri)
+            queryScreenshotNameQ(uri)
         } else {
-            queryScreenshotPaths(uri)
+            queryScreenshotNamePreQ(uri)
         }
     }
 
-    private fun queryScreenshotNames(uri: Uri): List<String> {
+    private fun queryScreenshotNameQ(uri: Uri): String? {
         val projection = arrayOf(
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.RELATIVE_PATH,
         )
-        val screenshots = mutableListOf<String>()
         contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
             val displayNameIndex = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
             val relativePathIndex = cursor.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH)
             while (cursor.moveToNext()) {
-                val displayName = cursor.getString(displayNameIndex)
+                val displayName = cursor.getString(displayNameIndex) ?: continue
                 val relativePath =
                     if (relativePathIndex >= 0) cursor.getString(relativePathIndex) else null
-                if (displayName.contains("screenshot", ignoreCase = true) ||
-                    relativePath?.contains("screenshot", ignoreCase = true) == true
-                ) {
-                    screenshots.add(displayName)
+                if (isScreenshot(displayName, relativePath.orEmpty())) {
+                    return displayName
                 }
             }
         }
-        return screenshots
+        return null
     }
 
-    private fun queryScreenshotPaths(uri: Uri): List<String> {
+    private fun queryScreenshotNamePreQ(uri: Uri): String? {
         val projection = arrayOf(MediaStore.Images.Media.DATA)
-        val screenshots = mutableListOf<String>()
         contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
             val dataIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
             while (cursor.moveToNext()) {
-                val data = cursor.getString(dataIndex)
-                if (data.contains("screenshot", ignoreCase = true)) {
-                    screenshots.add(data.substringAfterLast('/'))
+                val data = cursor.getString(dataIndex) ?: continue
+                if (isScreenshot(data.substringAfterLast('/'), data)) {
+                    return data.substringAfterLast('/')
                 }
             }
         }
-        return screenshots
+        return null
+    }
+
+    private fun isScreenshot(displayName: String, path: String): Boolean {
+        val haystack = "$displayName $path".lowercase()
+        return SCREENSHOT_KEYWORDS.any(haystack::contains)
+    }
+
+    private companion object {
+        val SCREENSHOT_KEYWORDS = listOf(
+            "screenshot",
+            "screen_shot",
+            "screencap",
+            "screen_capture",
+            "screenshots",
+            "screencapture",
+        )
+
+        const val DEBOUNCE_MS = 1_000L
     }
 }
