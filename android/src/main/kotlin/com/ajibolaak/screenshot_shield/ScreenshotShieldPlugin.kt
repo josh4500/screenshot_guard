@@ -2,13 +2,23 @@ package com.ajibolaak.screenshot_shield
 
 import android.app.Activity
 import android.content.Context
+import android.os.Build
 import android.provider.MediaStore
 import android.view.WindowManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
 
-/** Detects user screenshots and optionally prevents screen capture. */
+/**
+ * Detects user screenshots and optionally prevents screen capture.
+ *
+ * On Android 14+ (API 34) the framework `DETECT_SCREEN_CAPTURE` API is used
+ * when the activity is started; on older devices the media store is observed
+ * instead.
+ */
 class ScreenshotShieldPlugin :
     FlutterPlugin,
     ActivityAware,
@@ -16,8 +26,13 @@ class ScreenshotShieldPlugin :
 
     private var applicationContext: Context? = null
     private var activity: Activity? = null
+    private var lifecycle: Lifecycle? = null
+    private var lifecycleObserver: LifecycleEventObserver? = null
     private var contentObserver: ScreenshotContentObserver? = null
+    private var screenCaptureCallback: Activity.ScreenCaptureCallback? = null
     private var lastScreenshotName: String? = null
+    private var listening = false
+    private var activityStarted = false
     private val streamHandler = ScreenshotShieldStreamHandler()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -37,26 +52,49 @@ class ScreenshotShieldPlugin :
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        lifecycle = (binding.lifecycle as? HiddenLifecycleReference)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    activityStarted = true
+                    updateObservation()
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    activityStarted = false
+                    updateObservation()
+                }
+                else -> {}
+            }
+        }
+        lifecycleObserver = observer
+        lifecycle?.addObserver(observer)
+        updateObservation()
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
-        activity = null
+        onDetachedFromActivity()
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activity = binding.activity
+        onAttachedToActivity(binding)
     }
 
     override fun onDetachedFromActivity() {
+        lifecycleObserver?.let { lifecycle?.removeObserver(it) }
+        lifecycleObserver = null
+        lifecycle = null
+        unregisterScreenCaptureCallback()
         activity = null
     }
 
     override fun startListening() {
-        startObserving()
+        listening = true
+        updateObservation()
     }
 
     override fun stopListening() {
-        stopObserving()
+        listening = false
+        updateObservation()
     }
 
     override fun setProtected(protected: Boolean) {
@@ -71,8 +109,40 @@ class ScreenshotShieldPlugin :
         }
     }
 
-    private fun startObserving() {
+    private fun updateObservation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            updateScreenCaptureCallback()
+        } else {
+            updateContentObserver()
+        }
+    }
+
+    private fun updateScreenCaptureCallback() {
+        val currentActivity = activity
+        if (listening && activityStarted && currentActivity != null) {
+            if (screenCaptureCallback != null) return
+            val callback = Activity.ScreenCaptureCallback {
+                streamHandler.emitScreenshotDetected()
+            }
+            screenCaptureCallback = callback
+            currentActivity.registerScreenCaptureCallback(currentActivity.mainExecutor, callback)
+        } else {
+            unregisterScreenCaptureCallback()
+        }
+    }
+
+    private fun unregisterScreenCaptureCallback() {
+        val callback = screenCaptureCallback ?: return
+        activity?.unregisterScreenCaptureCallback(callback)
+        screenCaptureCallback = null
+    }
+
+    private fun updateContentObserver() {
         val context = applicationContext ?: return
+        if (!listening) {
+            stopContentObserver()
+            return
+        }
         if (contentObserver != null) return
         contentObserver = ScreenshotContentObserver(context.contentResolver) { displayName ->
             if (displayName != lastScreenshotName) {
@@ -87,11 +157,16 @@ class ScreenshotShieldPlugin :
         )
     }
 
-    private fun stopObserving() {
+    private fun stopContentObserver() {
         val observer = contentObserver ?: return
         applicationContext?.contentResolver?.unregisterContentObserver(observer)
         contentObserver = null
         lastScreenshotName = null
+    }
+
+    private fun stopObserving() {
+        unregisterScreenCaptureCallback()
+        stopContentObserver()
     }
 }
 

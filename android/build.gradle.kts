@@ -72,6 +72,7 @@ kotlin {
 }
 
 dependencies {
+    compileOnly("androidx.lifecycle:lifecycle-common:2.8.7")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.mockito:mockito-core:5.0.0")
 }

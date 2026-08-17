@@ -9,11 +9,14 @@ Screenshot detection is best-effort and platform-specific:
 
 | Capability | Android | iOS |
 |---|---|---|
-| Screenshot detection | Yes - watches the media store and reports shortly after a screenshot is saved to `DCIM/Screenshots` | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
+| Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
 | Prevent screen capture (`setProtected(true)`) | Yes - adds the secure window flag so the captured frame is blank | No - no public API to prevent screenshots; it is a no-op |
-| Screenshot events while protected | No - the blanked capture is never saved, so no event fires | N/A - protection is not supported |
-| Runtime permission | Not required | Not required |
+| Screenshot events while protected | Below Android 14 the blanked capture is never saved, so no event fires; on Android 14+ the system API still reports the screenshot | N/A - protection is not supported |
+| Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) | Not required |
 
+On Android 14+, the system shows a notice whenever the screenshot detection
+API fires. Screenshots taken via ADB or instrumentation tests are not
+detected by either path.
 ## Usage
 
 Provide a `ScreenshotShield` to the tree with `ScreenshotShieldScope`, then
