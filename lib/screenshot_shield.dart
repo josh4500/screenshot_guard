@@ -6,7 +6,7 @@ export 'src/screenshot_shield_scope.dart';
 /// Guards a screen against being captured by the user.
 ///
 /// Use [startListening] to begin reporting [onScreenshotDetected] events and
-/// [setProtected] to prevent screen capture entirely on Android.
+/// [setProtection] to configure screen protection.
 ///
 /// Screenshot detection is best-effort: on Android it is reported shortly
 /// after the screenshot is saved to the media store, on iOS it is reported
@@ -25,21 +25,30 @@ class ScreenshotShield {
   /// Stops observing for screenshots.
   Future<void> stopListening() => _platform.stopListening();
 
-  /// Prevents screen capture on Android by adding the secure window flag.
+  /// Configures screen protection.
   ///
-  /// While [protected] is true the captured frame is blank and screenshot
+  /// [preventCapture] prevents screen capture on Android by adding the secure
+  /// window flag. While true the captured frame is blank and screenshot
   /// detections are not reported because the screenshot is never saved. On
   /// iOS this is a no-op because there is no public API to prevent
   /// screenshots.
-  Future<void> setProtected({required bool protected}) => _platform.setProtected(protected: protected);
-
-  /// Blurs the app content while the app is in the background, hiding it in
-  /// the app switcher. Defaults to disabled.
   ///
-  /// On iOS the key window is covered with a native blur effect. On Android 12+
-  /// the window is blurred with `RenderEffect`; on older Android versions a
-  /// dim overlay is shown because no public blur API exists.
-  Future<void> setBackgroundBlur({required bool blurEnabled}) => _platform.setBackgroundBlur(blurEnabled: blurEnabled);
+  /// [backgroundBlur] blurs the app content while the app is in the
+  /// background, hiding it in the app switcher. On iOS the key window is
+  /// covered with a native blur effect. On Android 12+ the window is blurred
+  /// with `RenderEffect`; on older Android versions a dim overlay is shown
+  /// because no public blur API exists.
+  ///
+  /// Both flags default to disabled. Omitted flags keep their current value,
+  /// so a single call can toggle one setting without disturbing the other.
+  Future<void> setProtection({bool? preventCapture, bool? backgroundBlur}) async {
+    if (preventCapture != null) {
+      await _platform.setProtected(protected: preventCapture);
+    }
+    if (backgroundBlur != null) {
+      await _platform.setBackgroundBlur(blurEnabled: backgroundBlur);
+    }
+  }
 
   /// Releases the native resources held by the plugin.
   Future<void> dispose() => _platform.dispose();

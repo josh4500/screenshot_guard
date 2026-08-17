@@ -10,7 +10,7 @@ Screenshot detection is best-effort and platform-specific:
 | Capability | Android | iOS |
 |---|---|---|
 | Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
-| Prevent screen capture (`setProtected(true)`) | Yes - adds the secure window flag so the captured frame is blank | No - no public API to prevent screenshots; it is a no-op |
+| Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | No - no public API to prevent screenshots; it is a no-op |
 | Screenshot events while protected | Below Android 14 the blanked capture is never saved, so no event fires; on Android 14+ the system API still reports the screenshot | N/A - protection is not supported |
 | Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) | Not required |
 
@@ -82,7 +82,7 @@ app's content in the app switcher, enable the native background blur:
 
 ```dart
 final shield = ScreenshotShield();
-await shield.setBackgroundBlur(blurEnabled: true);
+await shield.setProtection(backgroundBlur: true);
 ```
 
 On iOS the key window is covered with a `UIVisualEffectView` blur when the app
@@ -103,7 +103,7 @@ shield.onScreenshotDetected.listen((_) {
 
 // While this screen is visible:
 await shield.startListening();
-await shield.setProtected(true); // Android only: blanks the capture.
+await shield.setProtection(preventCapture: true); // Android only: blanks the capture.
 
 // When leaving the screen:
 await shield.stopListening();
@@ -111,7 +111,7 @@ await shield.stopListening();
 
 When a screenshot is detected, present the user with your own shareable image
 (e.g. via `share_plus`) instead of the captured frame. Note that while
-`setProtected(true)` is enabled on Android the screenshot is blanked and
+`preventCapture` is enabled on Android the screenshot is blanked and
 detection events will not fire.
 
 ## iOS configuration

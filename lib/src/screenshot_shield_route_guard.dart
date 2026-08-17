@@ -39,8 +39,9 @@ class ScreenshotShieldRouteGuard extends StatefulWidget {
   /// The subtree guarded while this route is in view.
   final Widget child;
 
-  /// Whether [ScreenshotShield.setProtected] is enabled while the route is in
-  /// view. On Android this blanks the captured frame. Defaults to `true`.
+  /// Whether capture prevention is enabled while the route is in view. On
+  /// Android this blanks the captured frame via the secure window flag.
+  /// Defaults to `true`.
   final bool preventCapture;
 
   /// Whether the guard listens for screenshots while the route is in view.
@@ -216,7 +217,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
       await shield.startListening();
     }
     if (widget.preventCapture) {
-      await shield.setProtected(protected: true);
+      await shield.setProtection(preventCapture: true);
     }
   }
 
@@ -225,7 +226,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
     _inView = false;
     final shield = _shield!;
     if (widget.preventCapture) {
-      await shield.setProtected(protected: false);
+      await shield.setProtection(preventCapture: false);
     }
     if (widget.detectScreenshots) {
       await shield.stopListening();

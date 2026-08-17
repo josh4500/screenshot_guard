@@ -63,16 +63,22 @@ void main() {
       expect(fakePlatform.calls, contains('stopListening'));
     });
 
-    test('forwards setProtected to the platform', () async {
-      await screenshotGuard.setProtected(protected: true);
+    test('forwards preventCapture to the platform', () async {
+      await screenshotGuard.setProtection(preventCapture: true);
 
       expect(fakePlatform.calls, contains('setProtected:true'));
     });
 
-    test('forwards setBackgroundBlur to the platform', () async {
-      await screenshotGuard.setBackgroundBlur(blurEnabled: true);
+    test('forwards backgroundBlur to the platform', () async {
+      await screenshotGuard.setProtection(backgroundBlur: true);
 
       expect(fakePlatform.calls, contains('setBackgroundBlur:true'));
+    });
+
+    test('omitted protection flags are not forwarded', () async {
+      await screenshotGuard.setProtection();
+
+      expect(fakePlatform.calls, isEmpty);
     });
 
     test('forwards onScreenshotDetected events', () async {
