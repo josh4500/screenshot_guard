@@ -37,6 +37,10 @@ abstract class ScreenshotShieldPlatform extends PlatformInterface {
   Future<void> setProtected({required bool protected}) =>
       throw UnsupportedError('setProtected() has not been implemented.');
 
+  /// Blurs the app content while the app is in the background.
+  Future<void> setBackgroundBlur({required bool blurEnabled}) =>
+      throw UnsupportedError('setBackgroundBlur() has not been implemented.');
+
   /// Releases the native resources held by the plugin.
   Future<void> dispose() => throw UnsupportedError('dispose() has not been implemented.');
 }

@@ -74,6 +74,25 @@ sees a black screenshot. To follow a Snapchat-style flow instead - let the
 screenshot succeed and react in `onScreenshotDetected` (for example by sending
 the captured image or notifying a peer) - set `preventCapture: false`.
 
+### Background privacy
+
+Screenshot detection only runs while the app is in the foreground, so a user
+in the background or the app switcher can take screenshots freely. To hide the
+app's content in the app switcher, enable the native background blur:
+
+```dart
+final shield = ScreenshotShield();
+await shield.setBackgroundBlur(blurEnabled: true);
+```
+
+On iOS the key window is covered with a `UIVisualEffectView` blur when the app
+enters the background. On Android 12+ the window is blurred with
+`RenderEffect`; on older Android versions a dim overlay is shown because no
+public blur API exists. The feature is disabled by default.
+
+Note that if `preventCapture` (`FLAG_SECURE`) is also enabled, the app-switcher
+snapshot stays blank and wins over the blur.
+
 For lower-level control you can drive `ScreenshotShield` directly:
 
 ```dart

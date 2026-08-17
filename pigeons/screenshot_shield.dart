@@ -17,6 +17,8 @@ abstract class ScreenshotShieldHostApi {
   void stopListening();
 
   void setProtected(bool protected);
+
+  void setBackgroundBlur(bool blurEnabled);
 }
 
 /// Events emitted from the host platform into Dart.

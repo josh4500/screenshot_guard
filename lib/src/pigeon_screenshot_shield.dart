@@ -28,5 +28,8 @@ class PigeonScreenshotShield extends ScreenshotShieldPlatform {
   Future<void> setProtected({required bool protected}) => _hostApi.setProtected(protected);
 
   @override
+  Future<void> setBackgroundBlur({required bool blurEnabled}) => _hostApi.setBackgroundBlur(blurEnabled);
+
+  @override
   Future<void> dispose() async {}
 }

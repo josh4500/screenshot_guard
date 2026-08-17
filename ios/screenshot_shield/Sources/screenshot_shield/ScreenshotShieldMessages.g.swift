@@ -104,6 +104,7 @@ protocol ScreenshotShieldHostApi {
   func startListening() throws
   func stopListening() throws
   func setProtected(protected: Bool) throws
+  func setBackgroundBlur(blurEnabled: Bool) throws
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -152,6 +153,21 @@ class ScreenshotShieldHostApiSetup {
       }
     } else {
       setProtectedChannel.setMessageHandler(nil)
+    }
+    let setBackgroundBlurChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setBackgroundBlur\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      setBackgroundBlurChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let blurEnabledArg = args[0] as! Bool
+        do {
+          try api.setBackgroundBlur(blurEnabled: blurEnabledArg)
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      setBackgroundBlurChannel.setMessageHandler(nil)
     }
   }
 }

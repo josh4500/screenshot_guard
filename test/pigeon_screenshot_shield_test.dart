@@ -15,6 +15,9 @@ class _FakeHostApi extends ScreenshotShieldHostApi {
 
   @override
   Future<void> setProtected(bool protected) async => calls.add('setProtected:$protected');
+
+  @override
+  Future<void> setBackgroundBlur(bool blurEnabled) async => calls.add('setBackgroundBlur:$blurEnabled');
 }
 
 void main() {
@@ -46,6 +49,15 @@ void main() {
       await platform.setProtected(protected: true);
 
       expect(hostApi.calls, contains('setProtected:true'));
+    });
+
+    test('forwards setBackgroundBlur to the host api', () async {
+      final hostApi = _FakeHostApi();
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
+
+      await platform.setBackgroundBlur(blurEnabled: true);
+
+      expect(hostApi.calls, contains('setBackgroundBlur:true'));
     });
 
     test('forwards events from the event channel', () async {

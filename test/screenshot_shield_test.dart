@@ -22,6 +22,9 @@ class _FakeScreenshotShieldPlatform extends ScreenshotShieldPlatform {
   Future<void> setProtected({required bool protected}) async => calls.add('setProtected:$protected');
 
   @override
+  Future<void> setBackgroundBlur({required bool blurEnabled}) async => calls.add('setBackgroundBlur:$blurEnabled');
+
+  @override
   Future<void> dispose() async => calls.add('dispose');
 }
 
@@ -64,6 +67,12 @@ void main() {
       await screenshotGuard.setProtected(protected: true);
 
       expect(fakePlatform.calls, contains('setProtected:true'));
+    });
+
+    test('forwards setBackgroundBlur to the platform', () async {
+      await screenshotGuard.setBackgroundBlur(blurEnabled: true);
+
+      expect(fakePlatform.calls, contains('setBackgroundBlur:true'));
     });
 
     test('forwards onScreenshotDetected events', () async {

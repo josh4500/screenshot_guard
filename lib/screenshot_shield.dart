@@ -33,6 +33,14 @@ class ScreenshotShield {
   /// screenshots.
   Future<void> setProtected({required bool protected}) => _platform.setProtected(protected: protected);
 
+  /// Blurs the app content while the app is in the background, hiding it in
+  /// the app switcher. Defaults to disabled.
+  ///
+  /// On iOS the key window is covered with a native blur effect. On Android 12+
+  /// the window is blurred with `RenderEffect`; on older Android versions a
+  /// dim overlay is shown because no public blur API exists.
+  Future<void> setBackgroundBlur({required bool blurEnabled}) => _platform.setBackgroundBlur(blurEnabled: blurEnabled);
+
   /// Releases the native resources held by the plugin.
   Future<void> dispose() => _platform.dispose();
 }

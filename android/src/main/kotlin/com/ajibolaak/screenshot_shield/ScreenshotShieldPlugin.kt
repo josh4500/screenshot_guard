@@ -2,9 +2,15 @@ package com.ajibolaak.screenshot_shield
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.Color
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.os.Build
 import android.provider.MediaStore
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -13,11 +19,13 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
 
 /**
- * Detects user screenshots and optionally prevents screen capture.
+ * Detects user screenshots, optionally prevents screen capture, and can blur
+ * the app content while the app is in the background.
  *
  * On Android 14+ (API 34) the framework `DETECT_SCREEN_CAPTURE` API is used
  * when the activity is started; on older devices the media store is observed
- * instead.
+ * while the activity is started. Background blur uses `RenderEffect` on
+ * Android 12+ and a dim overlay below that.
  */
 class ScreenshotShieldPlugin :
     FlutterPlugin,
@@ -30,8 +38,11 @@ class ScreenshotShieldPlugin :
     private var lifecycleObserver: LifecycleEventObserver? = null
     private var contentObserver: ScreenshotContentObserver? = null
     private var screenCaptureCallback: Activity.ScreenCaptureCallback? = null
+    private var backgroundDimView: View? = null
     private var listening = false
     private var activityStarted = false
+    private var backgrounded = false
+    private var backgroundBlurEnabled = false
     private val streamHandler = ScreenshotShieldStreamHandler()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -43,6 +54,7 @@ class ScreenshotShieldPlugin :
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         stopObserving()
+        clearBackgroundBlur()
         ScreenshotShieldHostApi.setUp(binding.binaryMessenger, null)
         contentObserver = null
         applicationContext = null
@@ -61,6 +73,14 @@ class ScreenshotShieldPlugin :
                 Lifecycle.Event.ON_STOP -> {
                     activityStarted = false
                     updateObservation()
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    backgrounded = true
+                    applyBackgroundBlur()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    backgrounded = false
+                    clearBackgroundBlur()
                 }
                 else -> {}
             }
@@ -83,6 +103,7 @@ class ScreenshotShieldPlugin :
         lifecycleObserver = null
         lifecycle = null
         unregisterScreenCaptureCallback()
+        clearBackgroundBlur()
         activity = null
     }
 
@@ -105,6 +126,50 @@ class ScreenshotShieldPlugin :
             )
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    override fun setBackgroundBlur(blurEnabled: Boolean) {
+        backgroundBlurEnabled = blurEnabled
+        if (backgrounded) {
+            applyBackgroundBlur()
+        } else {
+            clearBackgroundBlur()
+        }
+    }
+
+    private fun applyBackgroundBlur() {
+        if (!backgroundBlurEnabled) return
+        val decorView = activity?.window?.decorView as? ViewGroup ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            decorView.setRenderEffect(
+                RenderEffect.createBlurEffect(
+                    BLUR_RADIUS,
+                    BLUR_RADIUS,
+                    Shader.TileMode.MIRROR,
+                ),
+            )
+        } else {
+            val dimView = backgroundDimView ?: View(applicationContext).apply {
+                setBackgroundColor(Color.argb(217, 0, 0, 0))
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            }.also { backgroundDimView = it }
+            if (dimView.parent == null) {
+                decorView.addView(dimView)
+            }
+        }
+    }
+
+    private fun clearBackgroundBlur() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            activity?.window?.decorView?.setRenderEffect(null)
+        } else {
+            val dimView = backgroundDimView ?: return
+            (dimView.parent as? ViewGroup)?.removeView(dimView)
+            backgroundDimView = null
         }
     }
 
@@ -138,7 +203,7 @@ class ScreenshotShieldPlugin :
 
     private fun updateContentObserver() {
         val context = applicationContext ?: return
-        if (!listening) {
+        if (!listening || !activityStarted) {
             stopContentObserver()
             return
         }
@@ -162,6 +227,10 @@ class ScreenshotShieldPlugin :
     private fun stopObserving() {
         unregisterScreenCaptureCallback()
         stopContentObserver()
+    }
+
+    private companion object {
+        const val BLUR_RADIUS = 24f
     }
 }
 

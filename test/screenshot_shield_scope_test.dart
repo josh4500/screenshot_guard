@@ -23,6 +23,9 @@ class _FakeScreenshotShieldPlatform extends ScreenshotShieldPlatform {
   Future<void> setProtected({required bool protected}) async => calls.add('setProtected:$protected');
 
   @override
+  Future<void> setBackgroundBlur({required bool blurEnabled}) async => calls.add('setBackgroundBlur:$blurEnabled');
+
+  @override
   Future<void> dispose() async {}
 }
 
