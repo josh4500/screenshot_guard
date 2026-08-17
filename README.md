@@ -16,6 +16,50 @@ Screenshot detection is best-effort and platform-specific:
 
 ## Usage
 
+Provide a `ScreenshotShield` to the tree with `ScreenshotShieldScope`, then
+wrap the screen you want to guard with a `ScreenshotShieldRouteGuard`. The
+guard observes the route it lives on: protection and screenshot listening are
+enabled while the route is in view and released automatically when another
+route covers it.
+
+```dart
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+
+// Wrap your app with the scope and register the observer with the navigator:
+ScreenshotShieldScope(
+  shield: ScreenshotShield(),
+  routeObserver: routeObserver,
+  child: MaterialApp(
+    navigatorObservers: [routeObserver],
+    home: const HomeScreen(),
+  ),
+);
+
+// Inside a guarded screen:
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ScreenshotShieldRouteGuard(
+      onScreenshotDetected: () {
+        // Show your own shareable image here.
+      },
+      child: const Scaffold(
+        body: Center(child: Text('Guarded')),
+      ),
+    );
+  }
+}
+```
+
+The guard reads its `ScreenshotShield` from the nearest `ScreenshotShieldScope`
+with `ScreenshotShieldScope.of(context)`. Configure the guard with a
+`preventCapture` flag (Android only, default `true`), a `detectScreenshots`
+flag (default `true`), and an optional `onScreenshotDetected` callback.
+
+For lower-level control you can drive `ScreenshotShield` directly:
+
 ```dart
 final shield = ScreenshotShield();
 shield.onScreenshotDetected.listen((_) {

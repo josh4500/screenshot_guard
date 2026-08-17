@@ -1,5 +1,8 @@
 import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
 
+export 'src/screenshot_shield_route_guard.dart';
+export 'src/screenshot_shield_scope.dart';
+
 /// Guards a screen against being captured by the user.
 ///
 /// Use [startListening] to begin reporting [onScreenshotDetected] events and
