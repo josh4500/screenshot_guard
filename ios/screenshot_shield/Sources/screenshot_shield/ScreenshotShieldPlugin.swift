@@ -79,6 +79,10 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
             window.addSubview(blurView)
         }
         backgroundBlurView = blurView
+        // Commit the blur immediately so the app-switcher snapshot includes it.
+        window.setNeedsLayout()
+        window.layoutIfNeeded()
+        CATransaction.flush()
     }
 
     private func hideBackgroundBlur() {
