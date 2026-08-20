@@ -28,7 +28,13 @@ flutter:
         pluginClass: ScreenshotShieldPlugin
       ios:
         pluginClass: ScreenshotShieldPlugin
+      windows:
+        pluginClass: ScreenshotShieldPlugin
+      linux:
+        pluginClass: ScreenshotShieldPlugin
 
 platforms:
   android:
   ios:
+  windows:
+  linux:

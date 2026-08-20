@@ -18,6 +18,19 @@ On Android 14+, the system shows a notice whenever the screenshot detection
 API fires. Screenshots taken via ADB or instrumentation tests are not
 detected by either path.
 
+### Desktop (Windows, Linux)
+
+The package registers on Windows and Linux so the widget layer works there,
+but desktop has no OS screenshot-detection or screenshot-prevention APIs, so
+`onScreenshotDetected` never fires, `startListening` is a no-op, and
+`preventCapture` cannot blank the capture. What does apply:
+
+- On **Windows**, enabling `setProtection(backgroundBlur: true)` cloaks the
+  window when it is deactivated or minimized, hiding it from alt-tab and the
+  taskbar preview.
+- On **Linux**, detection and protection are unavailable (no standard
+  mechanism); the Dart widgets still work.
+
 ## Usage
 
 Provide a `ScreenshotShield` to the tree with `ScreenshotShieldScope`, then
