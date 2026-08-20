@@ -9,7 +9,7 @@ let package = Package(
         .iOS("13.0")
     ],
     products: [
-        .library(name: "screenshot-guard", targets: ["screenshot_shield"])
+        .library(name: "screenshot-shield", targets: ["screenshot_shield"])
     ],
     dependencies: [
         .package(name: "FlutterFramework", path: "../FlutterFramework")
