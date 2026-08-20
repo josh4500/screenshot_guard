@@ -148,6 +148,28 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
     });
   }
 
+  @override
+  void didUpdateWidget(ScreenshotShieldRouteGuard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.preventCapture != widget.preventCapture ||
+        oldWidget.detectScreenshots != widget.detectScreenshots) {
+      if (_inView) {
+        unawaited(_resync());
+      }
+    }
+  }
+
+  Future<void> _resync() async {
+    if (!_inView) return;
+    final shield = _shield!;
+    if (widget.detectScreenshots) {
+      await shield.startListening();
+    } else {
+      await shield.stopListening();
+    }
+    await shield.setProtection(preventCapture: widget.preventCapture);
+  }
+
   Future<Uint8List?> _captureChild() async {
     final renderObject = _boundaryKey.currentContext?.findRenderObject();
     if (renderObject is! RenderRepaintBoundary) {
