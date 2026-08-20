@@ -121,6 +121,17 @@ and requires no permissions or `Info.plist` entries. Screenshot detection fires
 while the app is in the foreground; screenshots taken while the app is
 backgrounded (e.g. from the app switcher) are not reported.
 
+## Example app
+
+A runnable example lives in `example/`. It demonstrates detection, the
+captured-image callback, and the background blur, with toggles for each
+feature:
+
+```sh
+cd example
+flutter run
+```
+
 ## Install
 
 Add the dependency to your `pubspec.yaml`:
