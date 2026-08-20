@@ -1,4 +1,18 @@
 ## 0.1.0
 
-* Detect user screenshots on Android (media store observer) and iOS (photo library observer).
-* Optionally prevent screen capture on Android via the secure window flag.
+* Detect user screenshots on Android and iOS.
+* Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older Android
+  versions watch the media store for new screenshots.
+* iOS reports immediately via the `UIApplicationUserDidTakeScreenshotNotification`
+  system notification.
+* `ScreenshotShieldScope` provides a shared `ScreenshotShield` to the widget
+  tree.
+* `ScreenshotShieldRouteGuard` scopes protection to a route: capture prevention
+  and screenshot listening are enabled while the route is in view and released
+  when another route covers it.
+* Optional re-rasterized PNG of the guarded screen passed to
+  `onScreenshotDetected`.
+* Optional native background blur that hides the app content in the app
+  switcher (`setProtection(backgroundBlur: true)`).
+* Prevent screen capture on Android via the secure window flag
+  (`setProtection(preventCapture: true)`).
