@@ -1,6 +1,18 @@
 ## 0.1.2
 
-* Release 0.1.2.
+* Add Windows and Linux platform support. The Dart widgets work on desktop,
+  but screenshot detection and prevention are unavailable there (no OS APIs).
+  On Windows, `setProtection(backgroundBlur: true)` cloaks the window from
+  alt-tab and the taskbar preview while it is inactive or minimized.
+* iOS: `preventCapture` now blanks the app-switcher preview via a hidden
+  secure text field. User screenshots themselves cannot be blanked on iOS,
+  but detection and the shareable-image capture still work.
+* iOS: the background blur is applied on `willResignActive` so it reliably
+  appears in the app switcher.
+* Android: the background blur now triggers on the user-leave hint (before
+  `onPause`) and forces a frame commit so the recents thumbnail includes it.
+* Add a GitHub Actions workflow that publishes to pub.dev with configurable
+  major/minor/patch version bumps.
 
 ## 0.1.1
 
