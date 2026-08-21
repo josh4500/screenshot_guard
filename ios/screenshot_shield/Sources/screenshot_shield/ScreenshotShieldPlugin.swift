@@ -4,6 +4,7 @@ import UIKit
 public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHostApi {
     private let streamHandler = ScreenshotShieldStreamHandler()
     private var screenshotObserver: NSObjectProtocol?
+    private var secureTextField: UITextField?
     private var backgroundBlurEnabled = false
     private var backgroundBlurView: UIVisualEffectView?
     private var backgroundObserverTokens: [NSObjectProtocol] = []
@@ -36,19 +37,48 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     }
 
     public func setProtected(protected: Bool) throws {
-        // iOS has no public API to prevent screenshots, so this is a no-op.
+        if protected {
+            // A window containing a secure text entry field is excluded from
+            // system snapshots, so user screenshots of the app come out blank.
+            guard let window = Self.keyWindow(), secureTextField == nil else { return }
+            let field = UITextField()
+            field.isSecureTextEntry = true
+            field.isUserInteractionEnabled = false
+            field.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+            window.addSubview(field)
+            secureTextField = field
+        } else {
+            secureTextField?.removeFromSuperview()
+            secureTextField = nil
+        }
     }
 
     public func setBackgroundBlur(blurEnabled: Bool) throws {
         backgroundBlurEnabled = blurEnabled
         if blurEnabled {
             guard backgroundObserverTokens.isEmpty else { return }
+            // willResignActive fires before the app-switcher snapshot is
+            // captured, so the blur is reliably included in it.
+            let willResignActive = NotificationCenter.default.addObserver(
+                forName: UIApplication.willResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.showBackgroundBlur()
+            }
             let didEnterBackground = NotificationCenter.default.addObserver(
                 forName: UIApplication.didEnterBackgroundNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
                 self?.showBackgroundBlur()
+            }
+            let didBecomeActive = NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.hideBackgroundBlur()
             }
             let willEnterForeground = NotificationCenter.default.addObserver(
                 forName: UIApplication.willEnterForegroundNotification,
@@ -57,7 +87,8 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
             ) { [weak self] _ in
                 self?.hideBackgroundBlur()
             }
-            backgroundObserverTokens = [didEnterBackground, willEnterForeground]
+            backgroundObserverTokens =
+                [willResignActive, didEnterBackground, didBecomeActive, willEnterForeground]
         } else {
             for token in backgroundObserverTokens {
                 NotificationCenter.default.removeObserver(token)
@@ -108,6 +139,7 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         for token in backgroundObserverTokens {
             NotificationCenter.default.removeObserver(token)
         }
+        secureTextField?.removeFromSuperview()
     }
 }
 

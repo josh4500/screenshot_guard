@@ -27,11 +27,12 @@ class ScreenshotShield {
 
   /// Configures screen protection.
   ///
-  /// [preventCapture] prevents screen capture on Android by adding the secure
-  /// window flag. While true the captured frame is blank and screenshot
-  /// detections are not reported because the screenshot is never saved. On
-  /// iOS this is a no-op because there is no public API to prevent
-  /// screenshots.
+  /// [preventCapture] prevents screen capture while the guarded route is in
+  /// view. On Android the secure window flag blanks the captured frame. On iOS
+  /// a hidden secure text field makes the system exclude the window from
+  /// snapshots, so user screenshots come out blank too. While blanked, the
+  /// screenshot event still fires and the guarded screen can still be
+  /// re-rasterized via the guard's capture.
   ///
   /// [backgroundBlur] blurs the app content while the app is in the
   /// background, hiding it in the app switcher. On iOS the key window is

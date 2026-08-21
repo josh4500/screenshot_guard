@@ -151,8 +151,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   @override
   void didUpdateWidget(ScreenshotShieldRouteGuard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.preventCapture != widget.preventCapture ||
-        oldWidget.detectScreenshots != widget.detectScreenshots) {
+    if (oldWidget.preventCapture != widget.preventCapture || oldWidget.detectScreenshots != widget.detectScreenshots) {
       if (_inView) {
         unawaited(_resync());
       }

@@ -17,6 +17,7 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
+import io.flutter.plugin.common.PluginRegistry
 
 /**
  * Detects user screenshots, optionally prevents screen capture, and can blur
@@ -34,8 +35,10 @@ class ScreenshotShieldPlugin :
 
     private var applicationContext: Context? = null
     private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
     private var lifecycle: Lifecycle? = null
     private var lifecycleObserver: LifecycleEventObserver? = null
+    private var userLeaveHintListener: PluginRegistry.UserLeaveHintListener? = null
     private var contentObserver: ScreenshotContentObserver? = null
     private var screenCaptureCallback: Activity.ScreenCaptureCallback? = null
     private var backgroundDimView: View? = null
@@ -62,16 +65,26 @@ class ScreenshotShieldPlugin :
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activityBinding = binding
         activity = binding.activity
         lifecycle = (binding.lifecycle as? HiddenLifecycleReference)?.lifecycle
+        // Fires before onPause when the user leaves the app (home/recents/back),
+        // so the blur is applied before the recents thumbnail is captured.
+        val userLeaveHintListener = PluginRegistry.UserLeaveHintListener {
+            applyBackgroundBlur()
+        }
+        this.userLeaveHintListener = userLeaveHintListener
+        binding.addOnUserLeaveHintListener(userLeaveHintListener)
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> {
                     activityStarted = true
+                    clearBackgroundBlur()
                     updateObservation()
                 }
                 Lifecycle.Event.ON_STOP -> {
                     activityStarted = false
+                    applyBackgroundBlur()
                     updateObservation()
                 }
                 Lifecycle.Event.ON_PAUSE -> {
@@ -99,6 +112,9 @@ class ScreenshotShieldPlugin :
     }
 
     override fun onDetachedFromActivity() {
+        userLeaveHintListener?.let { activityBinding?.removeOnUserLeaveHintListener(it) }
+        userLeaveHintListener = null
+        activityBinding = null
         lifecycleObserver?.let { lifecycle?.removeObserver(it) }
         lifecycleObserver = null
         lifecycle = null
@@ -159,8 +175,12 @@ class ScreenshotShieldPlugin :
             }.also { backgroundDimView = it }
             if (dimView.parent == null) {
                 decorView.addView(dimView)
+                decorView.requestLayout()
             }
         }
+        // Commit the blur into the next frame before the recents thumbnail is
+        // captured (the Android analog of the iOS CATransaction.flush).
+        decorView.invalidate()
     }
 
     private fun clearBackgroundBlur() {

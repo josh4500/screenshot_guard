@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -37,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isIOS = Platform.isIOS;
     return ScreenshotShieldRouteGuard(
       preventCapture: preventCapture,
       detectScreenshots: detectScreenshots,
@@ -70,10 +68,8 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 16),
             SwitchListTile(
               title: const Text('Prevent capture'),
-              subtitle: Text(
-                isIOS
-                    ? 'No-op on iOS (no public API to prevent screenshots)'
-                    : 'Blanks the captured frame on Android',
+              subtitle: const Text(
+                'Blanks the captured frame (Android and iOS)',
               ),
               value: preventCapture,
               onChanged: (value) => setState(() => preventCapture = value),

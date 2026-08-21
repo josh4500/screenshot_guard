@@ -10,8 +10,8 @@ Screenshot detection is best-effort and platform-specific:
 | Capability | Android | iOS |
 |---|---|---|
 | Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
-| Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | No - no public API to prevent screenshots; it is a no-op |
-| Screenshot events while protected | Below Android 14 the blanked capture is never saved, so no event fires; on Android 14+ the system API still reports the screenshot | N/A - protection is not supported |
+| Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - a hidden secure text field makes the system exclude the window from snapshots, so screenshots come out blank |
+| Screenshot events while protected | Below Android 14 the blanked capture is never saved, so no event fires; on Android 14+ the system API still reports the screenshot | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
 | Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) | Not required |
 
 On Android 14+, the system shows a notice whenever the screenshot detection
@@ -82,8 +82,8 @@ unavailable.
 
 ### Detect-and-notify mode
 
-By default `preventCapture` blanks the captured frame on Android, so the user
-sees a black screenshot. To follow a Snapchat-style flow instead - let the
+By default `preventCapture` blanks the captured frame on Android and iOS, so the
+user sees a black screenshot. To follow a Snapchat-style flow instead - let the
 screenshot succeed and react in `onScreenshotDetected` (for example by sending
 the captured image or notifying a peer) - set `preventCapture: false`.
 
@@ -116,7 +116,7 @@ shield.onScreenshotDetected.listen((_) {
 
 // While this screen is visible:
 await shield.startListening();
-await shield.setProtection(preventCapture: true); // Android only: blanks the capture.
+await shield.setProtection(preventCapture: true); // Blanks the captured frame.
 
 // When leaving the screen:
 await shield.stopListening();
@@ -124,8 +124,10 @@ await shield.stopListening();
 
 When a screenshot is detected, present the user with your own shareable image
 (e.g. via `share_plus`) instead of the captured frame. Note that while
-`preventCapture` is enabled on Android the screenshot is blanked and
-detection events will not fire.
+`preventCapture` is enabled on Android the screenshot is blanked and detection
+events will not fire (the blanked frame is never saved). On iOS the screenshot
+is blanked too, but the detection event still fires and the guarded screen can
+be re-rasterized into a shareable image.
 
 ## iOS configuration
 
