@@ -12,7 +12,7 @@ Screenshot detection is best-effort and platform-specific:
 | Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
 | Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - a hidden secure text field makes the system exclude the window from snapshots, so screenshots come out blank |
 | Screenshot events while protected | No - the secure window flag blanks the frame (it is never saved, so the media-store observer never fires) and, on Android 14+, the system withholds the capture callback for secure windows. The guards resolve this by dropping prevention when detection is also requested, so the event fires and the guarded screen is re-rasterized into a shareable image | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
-| Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) | Not required |
+| Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only); on Android 9 (API 28) and below, detection reads the media store and needs `READ_EXTERNAL_STORAGE`, which the host app must request at runtime | Not required |
 
 On Android, `preventCapture` (the secure window flag) and screenshot detection
 are mutually exclusive: the blanked frame is never saved and the system withholds

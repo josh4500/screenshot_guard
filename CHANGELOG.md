@@ -8,6 +8,14 @@
   Android when both are requested, and the guarded screen is re-rasterized into
   a shareable image instead. The system still shows a notice when detection
   fires on Android 14+.
+* Android: make media-store screenshot detection on Android 13 and below more
+  reliable. The observer now queries the most recently added image (filtered to
+  the last 15 seconds) instead of trusting the URI delivered by the media store,
+  which varies by Android version and OEM, and it no longer crashes when the
+  media query is blocked by permissions.
+* Android: declare `READ_EXTERNAL_STORAGE` (scoped to API 28 and below) so
+  detection can query the media store on Android 9 and older; the host app must
+  still request it at runtime.
 * Add `ScreenshotShieldGuard`, a non-route guard that activates while the
   widget is mounted and its `active` flag is `true`, for screens not managed
   by a `Navigator` with a `RouteObserver`.

@@ -7,6 +7,7 @@ import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -68,6 +69,12 @@ class ScreenshotShieldPlugin :
         activityBinding = binding
         activity = binding.activity
         lifecycle = (binding.lifecycle as? HiddenLifecycleReference)?.lifecycle
+        // If the lifecycle is unavailable (e.g. a custom activity embedding that
+        // does not expose one), fall back to treating the activity as started so
+        // screenshot detection can still be registered.
+        if (lifecycle == null) {
+            activityStarted = true
+        }
         // Fires before onPause when the user leaves the app (home/recents/back),
         // so the blur is applied before the recents thumbnail is captured.
         val userLeaveHintListener = PluginRegistry.UserLeaveHintListener {
@@ -124,11 +131,13 @@ class ScreenshotShieldPlugin :
     }
 
     override fun startListening() {
+        Log.d(TAG, "startListening")
         listening = true
         updateObservation()
     }
 
     override fun stopListening() {
+        Log.d(TAG, "stopListening")
         listening = false
         updateObservation()
     }
@@ -206,9 +215,11 @@ class ScreenshotShieldPlugin :
         if (listening && activityStarted && currentActivity != null) {
             if (screenCaptureCallback != null) return
             val callback = Activity.ScreenCaptureCallback {
+                Log.d(TAG, "system screen capture callback fired")
                 streamHandler.emitScreenshotDetected()
             }
             screenCaptureCallback = callback
+            Log.d(TAG, "registering screen capture callback")
             currentActivity.registerScreenCaptureCallback(currentActivity.mainExecutor, callback)
         } else {
             unregisterScreenCaptureCallback()
@@ -231,6 +242,7 @@ class ScreenshotShieldPlugin :
         contentObserver = ScreenshotContentObserver(context.contentResolver) {
             streamHandler.emitScreenshotDetected()
         }
+        Log.d(TAG, "registering media store content observer")
         context.contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             true,
@@ -250,6 +262,7 @@ class ScreenshotShieldPlugin :
     }
 
     private companion object {
+        const val TAG = "ScreenshotShield"
         const val BLUR_RADIUS = 24f
     }
 }

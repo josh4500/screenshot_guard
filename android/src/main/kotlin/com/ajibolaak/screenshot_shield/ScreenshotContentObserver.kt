@@ -3,82 +3,81 @@ package com.ajibolaak.screenshot_shield
 import android.content.ContentResolver
 import android.database.ContentObserver
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.util.Log
 
 /**
  * Observes the media store for newly saved screenshots.
  *
- * Android stores screenshots under a path whose name or directory contains a
- * screenshot-like keyword (e.g. `DCIM/Screenshots/Screenshot_2024-...`), so any
- * recently inserted image matching those keywords is reported to [onScreenshot].
- *
- * The media store can notify the observer several times for a single screenshot
- * write, so events are debounced: reports are suppressed for [DEBOUNCE_MS]
- * after a screenshot has already been classified.
+ * Media store notifications can carry a collection, volume or row URI depending
+ * on the Android version and OEM, so instead of trusting the delivered URI we
+ * query for the most recent image and test its name/path against screenshot
+ * keywords. Only images added in the last few seconds are considered, which
+ * avoids false positives from older screenshots still present in the store.
+ * Events are debounced because a single screenshot can notify the observer
+ * several times.
  */
 internal class ScreenshotContentObserver(
     private val contentResolver: ContentResolver,
     private val onScreenshot: () -> Unit,
 ) : ContentObserver(Handler(Looper.getMainLooper())) {
 
-    private var lastScreenshotName: String? = null
-    private var lastScreenshotTime: Long = 0
+    private var lastScreenshotTime = 0L
 
     override fun onChange(selfChange: Boolean, uri: Uri?) {
         super.onChange(selfChange, uri)
-        val screenshotUri = uri ?: return
         val now = System.currentTimeMillis()
-        if (now - lastScreenshotTime < DEBOUNCE_MS) return
-        val name = queryScreenshotName(screenshotUri) ?: return
-        if (name == lastScreenshotName) return
-        lastScreenshotName = name
+        if (now - lastScreenshotTime < DEBOUNCE_MS) {
+            Log.d(TAG, "media change ignored (debounced)")
+            return
+        }
+        val name = queryRecentScreenshotName() ?: return
+        Log.d(TAG, "screenshot detected: $name")
         lastScreenshotTime = now
         onScreenshot()
     }
 
-    private fun queryScreenshotName(uri: Uri): String? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            queryScreenshotNameQ(uri)
-        } else {
-            queryScreenshotNamePreQ(uri)
-        }
-    }
-
-    private fun queryScreenshotNameQ(uri: Uri): String? {
+    private fun queryRecentScreenshotName(): String? {
         val projection = arrayOf(
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.RELATIVE_PATH,
+            MediaStore.Images.Media.DATA,
         )
-        contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            val displayNameIndex = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
-            val relativePathIndex = cursor.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH)
-            while (cursor.moveToNext()) {
-                val displayName = cursor.getString(displayNameIndex) ?: continue
-                val relativePath =
-                    if (relativePathIndex >= 0) cursor.getString(relativePathIndex) else null
-                if (isScreenshot(displayName, relativePath.orEmpty())) {
-                    return displayName
-                }
+        val selection = "${MediaStore.Images.Media.DATE_ADDED} > ?"
+        val selectionArgs = arrayOf(((System.currentTimeMillis() / 1000L) - RECENT_WINDOW_S).toString())
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media._ID} DESC"
+        return try {
+            contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+                val displayName = readString(cursor, MediaStore.Images.Media.DISPLAY_NAME) ?: return null
+                val relativePath = readString(cursor, MediaStore.Images.Media.RELATIVE_PATH)
+                val data = readString(cursor, MediaStore.Images.Media.DATA)
+                val path = listOfNotNull(relativePath, data).joinToString(" ")
+                if (isScreenshot(displayName, path)) displayName else null
             }
+        } catch (exception: SecurityException) {
+            Log.w(TAG, "media query blocked", exception)
+            null
         }
-        return null
     }
 
-    private fun queryScreenshotNamePreQ(uri: Uri): String? {
-        val projection = arrayOf(MediaStore.Images.Media.DATA)
-        contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            val dataIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
-            while (cursor.moveToNext()) {
-                val data = cursor.getString(dataIndex) ?: continue
-                if (isScreenshot(data.substringAfterLast('/'), data)) {
-                    return data.substringAfterLast('/')
-                }
-            }
+    private fun readString(cursor: android.database.Cursor, column: String): String? {
+        val index = cursor.getColumnIndex(column)
+        if (index < 0) return null
+        return try {
+            cursor.getString(index)
+        } catch (exception: SecurityException) {
+            Log.w(TAG, "column $column blocked", exception)
+            null
         }
-        return null
     }
 
     private fun isScreenshot(displayName: String, path: String): Boolean {
@@ -87,6 +86,9 @@ internal class ScreenshotContentObserver(
     }
 
     private companion object {
+        const val TAG = "ScreenshotShield"
+        const val DEBOUNCE_MS = 1_000L
+        const val RECENT_WINDOW_S = 15L
         val SCREENSHOT_KEYWORDS = listOf(
             "screenshot",
             "screen_shot",
@@ -95,7 +97,5 @@ internal class ScreenshotContentObserver(
             "screenshots",
             "screencapture",
         )
-
-        const val DEBOUNCE_MS = 1_000L
     }
 }
