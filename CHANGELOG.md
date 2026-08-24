@@ -1,3 +1,17 @@
+## Unreleased
+
+* Android: fix `onScreenshotDetected` never firing while `preventCapture` is
+  enabled. The secure window flag blanks the frame (so the media-store observer
+  never fires) and, on Android 14+, the system withholds the screen-capture
+  callback for secure windows, so prevention and detection are mutually
+  exclusive. The guards now resolve the conflict by letting detection win on
+  Android when both are requested, and the guarded screen is re-rasterized into
+  a shareable image instead. The system still shows a notice when detection
+  fires on Android 14+.
+* Add `ScreenshotShieldGuard`, a non-route guard that activates while the
+  widget is mounted and its `active` flag is `true`, for screens not managed
+  by a `Navigator` with a `RouteObserver`.
+
 ## 0.1.2
 
 * Add Windows and Linux platform support. The Dart widgets work on desktop,

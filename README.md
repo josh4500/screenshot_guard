@@ -11,12 +11,16 @@ Screenshot detection is best-effort and platform-specific:
 |---|---|---|
 | Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
 | Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - a hidden secure text field makes the system exclude the window from snapshots, so screenshots come out blank |
-| Screenshot events while protected | Below Android 14 the blanked capture is never saved, so no event fires; on Android 14+ the system API still reports the screenshot | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
+| Screenshot events while protected | No - the secure window flag blanks the frame (it is never saved, so the media-store observer never fires) and, on Android 14+, the system withholds the capture callback for secure windows. The guards resolve this by dropping prevention when detection is also requested, so the event fires and the guarded screen is re-rasterized into a shareable image | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
 | Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) | Not required |
 
-On Android 14+, the system shows a notice whenever the screenshot detection
-API fires. Screenshots taken via ADB or instrumentation tests are not
-detected by either path.
+On Android, `preventCapture` (the secure window flag) and screenshot detection
+are mutually exclusive: the blanked frame is never saved and the system withholds
+the capture callback for secure windows, so no event fires while prevention is
+on. The guards handle this automatically by dropping prevention when
+`detectScreenshots` is also enabled on Android. On Android 14+, the system shows
+a notice whenever the screenshot detection API fires. Screenshots taken via ADB
+or instrumentation tests are not detected by either path.
 
 ### Desktop (Windows, Linux)
 
@@ -80,6 +84,11 @@ guarded subtree is re-rasterized into a PNG on each screenshot, so the app
 can show exactly what was on screen even when the OS frame is blanked or
 unavailable.
 
+For screens that are not managed by a `Navigator` (custom tabs, embedded
+views, overlays), use `ScreenshotShieldGuard` instead of the route guard. It
+provides the same flags and callback but activates while the widget is mounted
+and its `active` flag is `true`, without needing a `RouteObserver`.
+
 ### Detect-and-notify mode
 
 By default `preventCapture` blanks the captured frame on Android and iOS, so the
@@ -123,11 +132,14 @@ await shield.stopListening();
 ```
 
 When a screenshot is detected, present the user with your own shareable image
-(e.g. via `share_plus`) instead of the captured frame. Note that while
-`preventCapture` is enabled on Android the screenshot is blanked and detection
-events will not fire (the blanked frame is never saved). On iOS the screenshot
-is blanked too, but the detection event still fires and the guarded screen can
-be re-rasterized into a shareable image.
+(e.g. via `share_plus`) instead of the captured frame. Note that on Android
+`preventCapture` and screenshot detection cannot both be enabled: the secure
+window flag blanks the frame (never saved) and the system withholds the
+capture callback for secure windows, so no event fires while prevention is on.
+To get detection events on Android, keep `preventCapture` disabled; to blank
+the frame, accept that no events will fire. On iOS the screenshot is blanked
+and the detection event still fires, and the guarded screen can be
+re-rasterized into a shareable image.
 
 ## iOS configuration
 

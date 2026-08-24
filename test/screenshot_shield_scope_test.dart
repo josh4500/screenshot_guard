@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
@@ -98,6 +98,11 @@ void main() {
     ScreenshotShieldPlatform.instance = platform;
     shield = ScreenshotShield();
     routeObserver = RouteObserver<ModalRoute<void>>();
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+  });
+
+  tearDown(() {
+    debugDefaultTargetPlatformOverride = null;
   });
 
   group('ScreenshotShieldScope', () {
@@ -245,6 +250,45 @@ void main() {
       expect(platform.calls, contains('setProtected:true'));
       expect(platform.calls, isNot(contains('startListening')));
       expect(platform.calls, isNot(contains('stopListening')));
+    });
+
+    testWidgets('on Android, drops capture prevention so detection can fire when both are requested', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      await tester.pumpWidget(_buildApp(shield: shield, routeObserver: routeObserver, onScreenshotDetected: null));
+      await tester.pump();
+
+      expect(platform.calls, contains('startListening'));
+      expect(platform.calls, isNot(contains('setProtected:true')));
+    });
+
+    testWidgets('on Android, still prevents capture when detection is disabled', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      await tester.pumpWidget(
+        _buildApp(shield: shield, routeObserver: routeObserver, onScreenshotDetected: null, detectScreenshots: false),
+      );
+      await tester.pump();
+
+      expect(platform.calls, contains('setProtected:true'));
+      expect(platform.calls, isNot(contains('startListening')));
+    });
+
+    testWidgets('on Android, onScreenshotDetected fires when detection wins over prevention', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      var screenshots = 0;
+      await tester.pumpWidget(
+        _buildApp(
+          shield: shield,
+          routeObserver: routeObserver,
+          onScreenshotDetected: (_) => screenshots++,
+          captureOnScreenshot: false,
+        ),
+      );
+      await tester.pump();
+
+      platform.controller.add(null);
+      await tester.pump();
+
+      expect(screenshots, 1);
     });
 
     testWidgets('asserts when used more than once on the same route', (tester) async {

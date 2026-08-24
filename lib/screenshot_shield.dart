@@ -1,5 +1,6 @@
 import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
 
+export 'src/screenshot_shield_guard.dart';
 export 'src/screenshot_shield_route_guard.dart';
 export 'src/screenshot_shield_scope.dart';
 
@@ -28,11 +29,14 @@ class ScreenshotShield {
   /// Configures screen protection.
   ///
   /// [preventCapture] prevents screen capture while the guarded route is in
-  /// view. On Android the secure window flag blanks the captured frame. On iOS
+  /// view. On Android the secure window flag blanks the captured frame; on iOS
   /// a hidden secure text field makes the system exclude the window from
-  /// snapshots, so user screenshots come out blank too. While blanked, the
-  /// screenshot event still fires and the guarded screen can still be
-  /// re-rasterized via the guard's capture.
+  /// snapshots, so user screenshots come out blank too. On Android the secure
+  /// flag also suppresses screenshot detection (the blanked frame is never
+  /// saved and the system withholds the capture callback for secure windows),
+  /// so the guards drop prevention when detection is also requested there and
+  /// instead re-rasterize the guarded screen into a shareable image when a
+  /// screenshot is detected.
   ///
   /// [backgroundBlur] blurs the app content while the app is in the
   /// background, hiding it in the app switcher. On iOS the key window is
