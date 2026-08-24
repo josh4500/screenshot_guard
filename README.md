@@ -18,9 +18,11 @@ On Android, `preventCapture` (the secure window flag) and screenshot detection
 are mutually exclusive: the blanked frame is never saved and the system withholds
 the capture callback for secure windows, so no event fires while prevention is
 on. The guards handle this automatically by dropping prevention when
-`detectScreenshots` is also enabled on Android. On Android 14+, the system shows
-a notice whenever the screenshot detection API fires. Screenshots taken via ADB
-or instrumentation tests are not detected by either path.
+`detectScreenshots` is also enabled on Android. To keep the blanked frame
+instead, set `forcePreventCapture: true` on the guard (accepting that
+`onScreenshotDetected` will not fire). On Android 14+, the system shows a notice
+whenever the screenshot detection API fires. Screenshots taken via ADB or
+instrumentation tests are not detected by either path.
 
 ### Desktop (Windows, Linux)
 
@@ -78,11 +80,12 @@ class HomeScreen extends StatelessWidget {
 The guard reads its `ScreenshotShield` from the nearest `ScreenshotShieldScope`
 with `ScreenshotShieldScope.of(context)`. Configure the guard with a
 `preventCapture` flag (Android only, default `true`), a `detectScreenshots`
-flag (default `true`), a `captureOnScreenshot` flag (default `true`), and an
-optional `onScreenshotDetected` callback. With `captureOnScreenshot` the
-guarded subtree is re-rasterized into a PNG on each screenshot, so the app
-can show exactly what was on screen even when the OS frame is blanked or
-unavailable.
+flag (default `true`), a `forcePreventCapture` flag (default `false`) that
+makes blanking win over detection on Android, a `captureOnScreenshot` flag
+(default `true`), and an optional `onScreenshotDetected` callback. With
+`captureOnScreenshot` the guarded subtree is re-rasterized into a PNG on each
+screenshot, so the app can show exactly what was on screen even when the OS
+frame is blanked or unavailable.
 
 For screens that are not managed by a `Navigator` (custom tabs, embedded
 views, overlays), use `ScreenshotShieldGuard` instead of the route guard. It

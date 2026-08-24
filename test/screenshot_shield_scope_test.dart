@@ -57,6 +57,7 @@ Widget _buildApp({
   required ValueChanged<Uint8List?>? onScreenshotDetected,
   bool preventCapture = true,
   bool detectScreenshots = true,
+  bool forcePreventCapture = false,
   bool captureOnScreenshot = true,
 }) {
   return ScreenshotShieldScope(
@@ -72,6 +73,7 @@ Widget _buildApp({
                 onScreenshotDetected: onScreenshotDetected,
                 preventCapture: preventCapture,
                 detectScreenshots: detectScreenshots,
+                forcePreventCapture: forcePreventCapture,
                 captureOnScreenshot: captureOnScreenshot,
                 child: const Text('home'),
               ),
@@ -330,6 +332,21 @@ void main() {
       },
       variant: TargetPlatformVariant.only(TargetPlatform.android),
     );
+
+    testWidgets('on Android, forcePreventCapture applies prevention even when detection is on', (tester) async {
+      await tester.pumpWidget(
+        _buildApp(
+          shield: shield,
+          routeObserver: routeObserver,
+          onScreenshotDetected: null,
+          forcePreventCapture: true,
+        ),
+      );
+      await tester.pump();
+
+      expect(platform.calls, contains('startListening'));
+      expect(platform.calls, contains('setProtected:true'));
+    });
 
     testWidgets('asserts when used more than once on the same route', (tester) async {
       await tester.pumpWidget(

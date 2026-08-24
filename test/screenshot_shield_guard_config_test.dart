@@ -25,6 +25,18 @@ void main() {
       );
     });
 
+    test('forces prevention on Android when forcePreventCapture is true', () {
+      expect(
+        shouldPreventCapture(
+          preventCapture: true,
+          detectScreenshots: true,
+          platform: TargetPlatform.android,
+          forcePreventCapture: true,
+        ),
+        isTrue,
+      );
+    });
+
     test('applies prevention on Android when detection is disabled', () {
       expect(
         shouldPreventCapture(preventCapture: true, detectScreenshots: false, platform: TargetPlatform.android),

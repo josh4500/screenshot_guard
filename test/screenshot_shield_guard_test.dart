@@ -35,12 +35,14 @@ class _GuardHarness extends StatefulWidget {
     this.onScreenshotDetected,
     this.captureOnScreenshot = true,
     this.detectScreenshots = true,
+    this.forcePreventCapture = false,
   });
 
   final ScreenshotShield shield;
   final ValueChanged<Uint8List?>? onScreenshotDetected;
   final bool captureOnScreenshot;
   final bool detectScreenshots;
+  final bool forcePreventCapture;
 
   @override
   State<_GuardHarness> createState() => _GuardHarnessState();
@@ -62,6 +64,7 @@ class _GuardHarnessState extends State<_GuardHarness> {
                 onScreenshotDetected: widget.onScreenshotDetected,
                 captureOnScreenshot: widget.captureOnScreenshot,
                 detectScreenshots: widget.detectScreenshots,
+                forcePreventCapture: widget.forcePreventCapture,
                 child: const Text('guarded'),
               ),
               TextButton(
@@ -241,6 +244,18 @@ void main() {
 
         expect(platform.calls, contains('setProtected:true'));
         expect(platform.calls, isNot(contains('startListening')));
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'on Android, forcePreventCapture applies prevention even when detection is on',
+      (tester) async {
+        await tester.pumpWidget(_GuardHarness(shield: shield, forcePreventCapture: true));
+        await tester.pump();
+
+        expect(platform.calls, contains('startListening'));
+        expect(platform.calls, contains('setProtected:true'));
       },
       variant: TargetPlatformVariant.only(TargetPlatform.android),
     );

@@ -33,6 +33,7 @@ class ScreenshotShieldRouteGuard extends StatefulWidget {
     required this.child,
     this.preventCapture = true,
     this.detectScreenshots = true,
+    this.forcePreventCapture = false,
     this.captureOnScreenshot = true,
     this.onScreenshotDetected,
   });
@@ -49,6 +50,12 @@ class ScreenshotShieldRouteGuard extends StatefulWidget {
   /// Whether the guard listens for screenshots while the route is in view.
   /// Defaults to `true`.
   final bool detectScreenshots;
+
+  /// Whether capture prevention should win over screenshot detection on
+  /// Android when both are requested. On Android the secure window flag
+  /// suppresses detection, so forcing prevention means [onScreenshotDetected]
+  /// will not fire while this route is in view. Defaults to `false`.
+  final bool forcePreventCapture;
 
   /// Whether the guarded subtree is re-rasterized into a PNG when a screenshot
   /// is detected. The PNG bytes are passed to [onScreenshotDetected]; set to
@@ -82,6 +89,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
       shouldPreventCapture(
         preventCapture: widget.preventCapture,
         detectScreenshots: widget.detectScreenshots,
+        forcePreventCapture: widget.forcePreventCapture,
       );
 
   @override

@@ -19,6 +19,10 @@
 * Add `ScreenshotShieldGuard`, a non-route guard that activates while the
   widget is mounted and its `active` flag is `true`, for screens not managed
   by a `Navigator` with a `RouteObserver`.
+* Add `forcePreventCapture` to `ScreenshotShieldRouteGuard` and
+  `ScreenshotShieldGuard`. On Android it makes capture prevention win over
+  screenshot detection when both are requested (blanking the frame and
+  suppressing detection events), instead of the default where detection wins.
 
 ## 0.1.2
 
