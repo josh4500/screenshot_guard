@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.3
 
 * Android: fix `onScreenshotDetected` never firing while `preventCapture` is
   enabled. The secure window flag blanks the frame (so the media-store observer

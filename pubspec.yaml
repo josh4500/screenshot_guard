@@ -1,6 +1,6 @@
 name: screenshot_shield
 description: Detect user screenshots and optionally prevent screen capture on Android and iOS.
-version: 0.1.2
+version: 0.1.3
 repository: https://github.com/josh4500/screenshot_guard
 homepage: https://github.com/josh4500/screenshot_guard
 
