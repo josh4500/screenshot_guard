@@ -73,5 +73,19 @@ void main() {
       await subscription.cancel();
       await controller.close();
     });
+
+    test('forwards screen recording events from the event channel', () async {
+      final controller = StreamController<bool>.broadcast();
+      final platform = PigeonScreenshotShield(screenRecordingStream: () => controller.stream);
+      final events = <bool>[];
+      final subscription = platform.onScreenRecordingChanged.listen(events.add);
+
+      controller.add(true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, [true]);
+      await subscription.cancel();
+      await controller.close();
+    });
   });
 }

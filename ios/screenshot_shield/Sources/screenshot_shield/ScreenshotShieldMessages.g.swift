@@ -236,3 +236,17 @@ class OnScreenshotDetectedStreamHandler: PigeonEventChannelWrapper<Int64> {
   }
 }
       
+class OnScreenRecordingChangedStreamHandler: PigeonEventChannelWrapper<Bool> {
+  static func register(with messenger: FlutterBinaryMessenger,
+                      instanceName: String = "",
+                      streamHandler: OnScreenRecordingChangedStreamHandler) {
+    var channelName = "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldEventChannelApi.onScreenRecordingChanged"
+    if !instanceName.isEmpty {
+      channelName += ".\(instanceName)"
+    }
+    let internalStreamHandler = PigeonStreamHandler<Bool>(wrapper: streamHandler)
+    let channel = FlutterEventChannel(name: channelName, binaryMessenger: messenger, codec: screenshotShieldMessagesPigeonMethodCodec)
+    channel.setStreamHandler(internalStreamHandler)
+  }
+}
+      

@@ -204,3 +204,20 @@ override fun onListen(p0: Any?, sink: PigeonEventSink<Long>) {}
 override fun onCancel(p0: Any?) {}
 }
       
+abstract class OnScreenRecordingChangedStreamHandler : ScreenshotShieldMessagesPigeonEventChannelWrapper<Boolean> {
+  companion object {
+    fun register(messenger: BinaryMessenger, streamHandler: OnScreenRecordingChangedStreamHandler, instanceName: String = "") {
+      var channelName: String = "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldEventChannelApi.onScreenRecordingChanged"
+      if (instanceName.isNotEmpty()) {
+        channelName += ".$instanceName"
+      }
+      val internalStreamHandler = ScreenshotShieldMessagesPigeonStreamHandler<Boolean>(streamHandler)
+      EventChannel(messenger, channelName, ScreenshotShieldMessagesPigeonMethodCodec).setStreamHandler(internalStreamHandler)
+    }
+  }
+// Implement methods from ScreenshotShieldMessagesPigeonEventChannelWrapper
+override fun onListen(p0: Any?, sink: PigeonEventSink<Boolean>) {}
+
+override fun onCancel(p0: Any?) {}
+}
+      

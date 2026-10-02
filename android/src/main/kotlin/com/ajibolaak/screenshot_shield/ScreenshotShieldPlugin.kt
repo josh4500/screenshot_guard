@@ -42,18 +42,21 @@ class ScreenshotShieldPlugin :
     private var userLeaveHintListener: PluginRegistry.UserLeaveHintListener? = null
     private var contentObserver: ScreenshotContentObserver? = null
     private var screenCaptureCallback: Activity.ScreenCaptureCallback? = null
+    private var screenRecordingCallback: java.util.function.Consumer<Int>? = null
     private var backgroundDimView: View? = null
     private var listening = false
     private var activityStarted = false
     private var backgrounded = false
     private var backgroundBlurEnabled = false
     private val streamHandler = ScreenshotShieldStreamHandler()
+    private val screenRecordingStreamHandler = ScreenRecordingStreamHandler()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = flutterPluginBinding.applicationContext
         val messenger = flutterPluginBinding.binaryMessenger
         ScreenshotShieldHostApi.setUp(messenger, this)
         OnScreenshotDetectedStreamHandler.register(messenger, streamHandler)
+        OnScreenRecordingChangedStreamHandler.register(messenger, screenRecordingStreamHandler)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -126,6 +129,7 @@ class ScreenshotShieldPlugin :
         lifecycleObserver = null
         lifecycle = null
         unregisterScreenCaptureCallback()
+        unregisterScreenRecordingCallback()
         clearBackgroundBlur()
         activity = null
     }
@@ -208,6 +212,7 @@ class ScreenshotShieldPlugin :
         } else {
             updateContentObserver()
         }
+        updateScreenRecordingCallback()
     }
 
     private fun updateScreenCaptureCallback() {
@@ -230,6 +235,48 @@ class ScreenshotShieldPlugin :
         val callback = screenCaptureCallback ?: return
         activity?.unregisterScreenCaptureCallback(callback)
         screenCaptureCallback = null
+    }
+
+    /**
+     * Registers for screen recording state changes on Android 15 (API 35) and
+     * newer. Older versions have no public detection API, so nothing is
+     * registered and the event stream never emits.
+     */
+    private fun updateScreenRecordingCallback() {
+        val currentActivity = activity
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&
+            listening &&
+            activityStarted &&
+            currentActivity != null
+        ) {
+            if (screenRecordingCallback != null) return
+            val callback = java.util.function.Consumer<Int> { state ->
+                screenRecordingStreamHandler.emitScreenRecordingChanged(
+                    state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE,
+                )
+            }
+            screenRecordingCallback = callback
+            Log.d(TAG, "registering screen recording callback")
+            val initialState = currentActivity.windowManager.addScreenRecordingCallback(
+                currentActivity.mainExecutor,
+                callback,
+            )
+            screenRecordingStreamHandler.emitScreenRecordingChanged(
+                initialState == WindowManager.SCREEN_RECORDING_STATE_VISIBLE,
+            )
+        } else {
+            unregisterScreenRecordingCallback()
+        }
+    }
+
+    private fun unregisterScreenRecordingCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            screenRecordingCallback = null
+            return
+        }
+        val callback = screenRecordingCallback ?: return
+        activity?.windowManager?.removeScreenRecordingCallback(callback)
+        screenRecordingCallback = null
     }
 
     private fun updateContentObserver() {
@@ -258,6 +305,7 @@ class ScreenshotShieldPlugin :
 
     private fun stopObserving() {
         unregisterScreenCaptureCallback()
+        unregisterScreenRecordingCallback()
         stopContentObserver()
     }
 
@@ -280,5 +328,24 @@ private class ScreenshotShieldStreamHandler : OnScreenshotDetectedStreamHandler(
 
     fun emitScreenshotDetected() {
         eventSink?.success(0)
+    }
+}
+
+private class ScreenRecordingStreamHandler : OnScreenRecordingChangedStreamHandler() {
+    private var eventSink: PigeonEventSink<Boolean>? = null
+    private var lastState: Boolean? = null
+
+    override fun onListen(arguments: Any?, sink: PigeonEventSink<Boolean>) {
+        eventSink = sink
+        lastState?.let { sink.success(it) }
+    }
+
+    override fun onCancel(arguments: Any?) {
+        eventSink = null
+    }
+
+    fun emitScreenRecordingChanged(isRecording: Boolean) {
+        lastState = isRecording
+        eventSink?.success(isRecording)
     }
 }

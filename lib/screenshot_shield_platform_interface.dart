@@ -27,6 +27,17 @@ abstract class ScreenshotShieldPlatform extends PlatformInterface {
   /// Emits an event each time the user captures a screenshot.
   Stream<void> get onScreenshotDetected => throw UnsupportedError('onScreenshotDetected() has not been implemented.');
 
+  /// Emits the current screen-recording state whenever it changes.
+  ///
+  /// The stream emits `true` when the app is visible in a screen recording and
+  /// `false` when it is no longer recorded. The current state is emitted as
+  /// soon as the stream is listened to. Detection depends on the platform:
+  /// on iOS it reflects `UIScreen.isCaptured` (recording or mirroring), and on
+  /// Android it requires Android 15 (API 35) or newer — older versions never
+  /// emit. Observation is tied to [startListening]/[stopListening].
+  Stream<bool> get onScreenRecordingChanged =>
+      throw UnsupportedError('onScreenRecordingChanged() has not been implemented.');
+
   /// Starts observing for screenshots.
   Future<void> startListening() => throw UnsupportedError('startListening() has not been implemented.');
 

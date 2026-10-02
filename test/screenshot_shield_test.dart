@@ -7,10 +7,14 @@ import 'package:screenshot_shield/src/pigeon_screenshot_shield.dart';
 
 class _FakeScreenshotShieldPlatform extends ScreenshotShieldPlatform {
   final controller = StreamController<void>.broadcast();
+  final screenRecordingController = StreamController<bool>.broadcast();
   final calls = <String>[];
 
   @override
   Stream<void> get onScreenshotDetected => controller.stream;
+
+  @override
+  Stream<bool> get onScreenRecordingChanged => screenRecordingController.stream;
 
   @override
   Future<void> startListening() async => calls.add('startListening');
@@ -89,6 +93,17 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(events, hasLength(1));
+      await subscription.cancel();
+    });
+
+    test('forwards onScreenRecordingChanged events', () async {
+      final events = <bool>[];
+      final subscription = screenshotGuard.onScreenRecordingChanged.listen(events.add);
+
+      fakePlatform.screenRecordingController.add(true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, [true]);
       await subscription.cancel();
     });
   });

@@ -1,18 +1,20 @@
 # screenshot_shield
 
-Detects user screenshots and optionally prevents screen capture on Android and
-iOS.
+Detects user screenshots and screen recording, and optionally prevents screen
+capture, on Android and iOS.
 
 ## Platform behaviour
 
-Screenshot detection is best-effort and platform-specific:
+Screenshot and screen-recording detection are best-effort and
+platform-specific:
 
 | Capability | Android | iOS |
 |---|---|---|
 | Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
+| Screen-recording detection (`onScreenRecordingChanged`) | Yes - Android 15+ (API 35) reports whether the app's activities are visible in a screen recording via `DETECT_SCREEN_RECORDING`; older versions never emit | Yes - reflects `UIScreen.isCaptured`, which is also `true` while the screen is mirrored (for example via AirPlay); the simulator always reports not recording |
 | Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - a hidden secure text field makes the system exclude the window from snapshots, so screenshots come out blank |
 | Screenshot events while protected | No - the secure window flag blanks the frame (it is never saved, so the media-store observer never fires) and, on Android 14+, the system withholds the capture callback for secure windows. The guards resolve this by dropping prevention when detection is also requested, so the event fires and the guarded screen is re-rasterized into a shareable image | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
-| Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only); on Android 9 (API 28) and below, detection reads the media store and needs `READ_EXTERNAL_STORAGE`, which the host app must request at runtime | Not required |
+| Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) and `DETECT_SCREEN_RECORDING` (auto-granted, Android 15+ only); on Android 9 (API 28) and below, screenshot detection reads the media store and needs `READ_EXTERNAL_STORAGE`, which the host app must request at runtime | Not required |
 
 On Android, `preventCapture` (the secure window flag) and screenshot detection
 are mutually exclusive: the blanked frame is never saved and the system withholds
@@ -28,8 +30,15 @@ instrumentation tests are not detected by either path.
 
 The package registers on Windows and Linux so the widget layer works there,
 but desktop has no OS screenshot-detection or screenshot-prevention APIs, so
-`onScreenshotDetected` never fires, `startListening` is a no-op, and
-`preventCapture` cannot blank the capture. What does apply:
+`onScreenshotDetected` never fires, `startListening` is a no-op for
+screenshots, and `preventCapture` cannot blank the capture. Screen-recording
+detection is available as a best-effort heuristic: while `startListening` is
+active the running process list is sampled every two seconds and
+`onScreenRecordingChanged` emits `true` when a well-known screen recorder (for
+example OBS, Bandicam, Camtasia, Kazam, Kooha, `wf-recorder`) is found. This is
+intentionally conservative but still unreliable - a recorder that is open but
+idle is reported as recording, and an unlisted or sandboxed recorder is missed.
+What does apply:
 
 - On **Windows**, enabling `setProtection(backgroundBlur: true)` cloaks the
   window when it is deactivated or minimized, hiding it from alt-tab and the
@@ -144,12 +153,40 @@ the frame, accept that no events will fire. On iOS the screenshot is blanked
 and the detection event still fires, and the guarded screen can be
 re-rasterized into a shareable image.
 
+### Screen-recording detection
+
+While `startListening` is active you can observe whether the app is currently
+visible in a screen recording:
+
+```dart
+final shield = ScreenshotShield();
+shield.onScreenRecordingChanged.listen((isRecording) {
+  if (isRecording) {
+    // The app is being recorded.
+  }
+});
+
+await shield.startListening();
+```
+
+The stream emits the current state when it is first listened to and then on
+every change. Support is platform-specific: iOS reports `UIScreen.isCaptured`
+(which is also `true` while the screen is mirrored, for example via AirPlay),
+Android reports recording visibility on Android 15 (API 35) and newer, and
+Windows and Linux use a best-effort process-name heuristic (see below). Screen
+recording does not affect `onScreenshotDetected`.
+
 ## iOS configuration
 
 The iOS implementation observes `UIApplicationUserDidTakeScreenshotNotification`
 and requires no permissions or `Info.plist` entries. Screenshot detection fires
 while the app is in the foreground; screenshots taken while the app is
 backgrounded (e.g. from the app switcher) are not reported.
+
+Screen-recording detection observes `UIScreen.capturedDidChangeNotification`
+and reads `UIScreen.isCaptured`, so it also reports screen mirroring (for
+example AirPlay). The simulator always reports `isCaptured == true`, so it is
+treated as not recording.
 
 ## Example app
 

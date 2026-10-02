@@ -25,4 +25,6 @@ abstract class ScreenshotShieldHostApi {
 @EventChannelApi()
 abstract class ScreenshotShieldEventChannelApi {
   int onScreenshotDetected();
+
+  bool onScreenRecordingChanged();
 }

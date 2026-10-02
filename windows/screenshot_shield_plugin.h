@@ -1,9 +1,14 @@
 #ifndef FLUTTER_PLUGIN_SCREENSHOT_SHIELD_PLUGIN_H_
 #define FLUTTER_PLUGIN_SCREENSHOT_SHIELD_PLUGIN_H_
 
+#include <windows.h>
+
+#include <flutter/encodable_value.h>
+#include <flutter/event_sink.h>
 #include <flutter/plugin_registrar_windows.h>
 
 #include <memory>
+#include <optional>
 
 namespace screenshot_shield {
 
@@ -15,9 +20,33 @@ class ScreenshotShieldPlugin : public flutter::Plugin {
 
   virtual ~ScreenshotShieldPlugin();
 
+  // Host API: start or stop sampling for screen recorders.
+  void StartListening();
+  void StopListening();
+
+  // Event channel sink management for onScreenRecordingChanged.
+  void AttachScreenRecordingSink(
+      std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> sink);
+  void DetachScreenRecordingSink();
+
+  // Samples the running processes and emits a change on the screen-recording
+  // stream.
+  void PollScreenRecording();
+
+  void SetWindow(HWND window);
+
   // Disallow copy and assign.
   ScreenshotShieldPlugin(const ScreenshotShieldPlugin&) = delete;
   ScreenshotShieldPlugin& operator=(const ScreenshotShieldPlugin&) = delete;
+
+ private:
+  static bool IsKnownRecorderRunning();
+
+  HWND window_ = nullptr;
+  bool listening_ = false;
+  std::optional<bool> last_state_;
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>
+      screen_recording_sink_;
 };
 
 }  // namespace screenshot_shield

@@ -6,12 +6,14 @@ export 'src/screenshot_shield_scope.dart';
 
 /// Guards a screen against being captured by the user.
 ///
-/// Use [startListening] to begin reporting [onScreenshotDetected] events and
-/// [setProtection] to configure screen protection.
+/// Use [startListening] to begin reporting [onScreenshotDetected] and
+/// [onScreenRecordingChanged] events, and [setProtection] to configure screen
+/// protection.
 ///
 /// Screenshot detection is best-effort: on Android it is reported shortly
 /// after the screenshot is saved to the media store, on iOS it is reported
-/// immediately when the screenshot is taken.
+/// immediately when the screenshot is taken. Screen-recording detection is
+/// supported on iOS and on Android 15 (API 35) and newer.
 class ScreenshotShield {
   ScreenshotShield({ScreenshotShieldPlatform? platform}) : _platform = platform ?? ScreenshotShieldPlatform.instance;
 
@@ -19,6 +21,17 @@ class ScreenshotShield {
 
   /// Emits an event each time the user captures a screenshot.
   Stream<void> get onScreenshotDetected => _platform.onScreenshotDetected;
+
+  /// Emits the current screen-recording state whenever it changes.
+  ///
+  /// The stream emits `true` when the app is visible in a screen recording and
+  /// `false` when it is no longer recorded, including the current state when
+  /// first listened to. Detection requires [startListening] to be active and
+  /// is platform-specific: on iOS it reflects `UIScreen.isCaptured`, which is
+  /// also `true` while the screen is mirrored (for example via AirPlay); on
+  /// Android it uses the Android 15 (API 35) `DETECT_SCREEN_RECORDING` API and
+  /// never emits on older versions.
+  Stream<bool> get onScreenRecordingChanged => _platform.onScreenRecordingChanged;
 
   /// Starts observing for screenshots.
   Future<void> startListening() => _platform.startListening();

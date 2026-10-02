@@ -3,7 +3,9 @@ import UIKit
 
 public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHostApi {
     private let streamHandler = ScreenshotShieldStreamHandler()
+    private let screenRecordingStreamHandler = ScreenRecordingStreamHandler()
     private var screenshotObserver: NSObjectProtocol?
+    private var screenRecordingObserver: NSObjectProtocol?
     private var secureTextField: UITextField?
     private var backgroundBlurEnabled = false
     private var backgroundBlurView: UIVisualEffectView?
@@ -14,19 +16,36 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         let instance = ScreenshotShieldPlugin()
         ScreenshotShieldHostApiSetup.setUp(binaryMessenger: messenger, api: instance)
         OnScreenshotDetectedStreamHandler.register(with: messenger, streamHandler: instance.streamHandler)
+        OnScreenRecordingChangedStreamHandler.register(
+            with: messenger,
+            streamHandler: instance.screenRecordingStreamHandler
+        )
     }
 
     // MARK: - ScreenshotShieldHostApi
 
     public func startListening() throws {
-        guard screenshotObserver == nil else { return }
-        screenshotObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.userDidTakeScreenshotNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.streamHandler.emitScreenshotDetected()
+        if screenshotObserver == nil {
+            screenshotObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.userDidTakeScreenshotNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.streamHandler.emitScreenshotDetected()
+            }
         }
+        if screenRecordingObserver == nil {
+            screenRecordingObserver = NotificationCenter.default.addObserver(
+                forName: UIScreen.capturedDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emitScreenRecordingState()
+            }
+        }
+        // Report the state at the moment listening starts; the notification only
+        // fires on subsequent changes.
+        emitScreenRecordingState()
     }
 
     public func stopListening() throws {
@@ -34,6 +53,27 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
             NotificationCenter.default.removeObserver(screenshotObserver)
             self.screenshotObserver = nil
         }
+        if let screenRecordingObserver {
+            NotificationCenter.default.removeObserver(screenRecordingObserver)
+            self.screenRecordingObserver = nil
+        }
+    }
+
+    // MARK: - Screen recording
+
+    private func emitScreenRecordingState() {
+        screenRecordingStreamHandler.emitScreenRecordingChanged(isScreenRecording)
+    }
+
+    /// `UIScreen.isCaptured` covers screen recording and screen mirroring. The
+    /// simulator always reports `true`, so it is treated as not captured to
+    /// avoid false positives during development.
+    private var isScreenRecording: Bool {
+        #if targetEnvironment(simulator)
+            return false
+        #else
+            return UIScreen.main.isCaptured
+        #endif
     }
 
     public func setProtected(protected: Bool) throws {
@@ -136,6 +176,9 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         if let screenshotObserver {
             NotificationCenter.default.removeObserver(screenshotObserver)
         }
+        if let screenRecordingObserver {
+            NotificationCenter.default.removeObserver(screenRecordingObserver)
+        }
         for token in backgroundObserverTokens {
             NotificationCenter.default.removeObserver(token)
         }
@@ -156,5 +199,26 @@ class ScreenshotShieldStreamHandler: OnScreenshotDetectedStreamHandler {
 
     func emitScreenshotDetected() {
         eventSink?.success(0)
+    }
+}
+
+class ScreenRecordingStreamHandler: OnScreenRecordingChangedStreamHandler {
+    private var eventSink: PigeonEventSink<Bool>?
+    private var lastState: Bool?
+
+    override func onListen(withArguments arguments: Any?, sink: PigeonEventSink<Bool>) {
+        eventSink = sink
+        if let lastState {
+            sink.success(lastState)
+        }
+    }
+
+    override func onCancel(withArguments arguments: Any?) {
+        eventSink = nil
+    }
+
+    func emitScreenRecordingChanged(_ isRecording: Bool) {
+        lastState = isRecording
+        eventSink?.success(isRecording)
     }
 }

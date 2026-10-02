@@ -139,3 +139,22 @@ Stream<int> onScreenshotDetected({String instanceName = ''}) {
     return event as int;
   });
 }
+
+/// Returns a broadcast [Stream] of events from the `onScreenRecordingChanged` event channel.
+///
+/// Each call to this method creates a new [EventChannel], so it should
+/// not be called multiple times for the same `instanceName`. To deliver
+/// events to multiple listeners, call this method once and listen to the
+/// returned broadcast stream multiple times instead.
+Stream<bool> onScreenRecordingChanged({String instanceName = ''}) {
+  if (instanceName.isNotEmpty) {
+    instanceName = '.$instanceName';
+  }
+  final EventChannel onScreenRecordingChangedChannel = EventChannel(
+    'dev.flutter.pigeon.screenshot_shield.ScreenshotShieldEventChannelApi.onScreenRecordingChanged$instanceName',
+    pigeonMethodCodec,
+  );
+  return onScreenRecordingChangedChannel.receiveBroadcastStream().map((dynamic event) {
+    return event as bool;
+  });
+}

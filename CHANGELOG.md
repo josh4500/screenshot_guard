@@ -1,3 +1,18 @@
+## 0.1.4
+
+* Add `ScreenshotShield.onScreenRecordingChanged`, a `Stream<bool>` that emits
+  the current screen-recording state (and the current value on subscription)
+  while `startListening` is active.
+* iOS: report screen recording (and screen mirroring) via
+  `UIScreen.capturedDidChangeNotification` / `UIScreen.isCaptured`.
+* Android: report screen recording on Android 15 (API 35) and newer via the
+  `DETECT_SCREEN_RECORDING` API; older versions never emit. The
+  `DETECT_SCREEN_RECORDING` permission is declared.
+* Windows and Linux: best-effort screen-recording detection by sampling the
+  running process list for well-known recorders (OBS, Bandicam, Camtasia,
+  Kazam, Kooha, `wf-recorder`, and others) every two seconds. This is
+  heuristic and can both miss unlisted recorders and report an idle recorder.
+
 ## 0.1.3
 
 * Android: fix `onScreenshotDetected` never firing while `preventCapture` is
