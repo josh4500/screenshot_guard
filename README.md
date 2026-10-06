@@ -12,7 +12,7 @@ platform-specific:
 |---|---|---|
 | Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
 | Screen-recording detection (`onScreenRecordingChanged`) | Yes - Android 15+ (API 35) reports whether the app's activities are visible in a screen recording via `DETECT_SCREEN_RECORDING`; older versions never emit | Yes - reflects `UIScreen.isCaptured`, which is also `true` while the screen is mirrored (for example via AirPlay); the simulator always reports not recording |
-| Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - a hidden secure text field makes the system exclude the window from snapshots, so screenshots come out blank |
+| Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - the app's content layer is nested inside a secure text field's capture-excluded layer, so screenshots come out blank (undocumented UIKit behaviour, see [iOS configuration](#ios-configuration)) |
 | Screenshot events while protected | No - the secure window flag blanks the frame (it is never saved, so the media-store observer never fires) and, on Android 14+, the system withholds the capture callback for secure windows. The guards resolve this by dropping prevention when detection is also requested, so the event fires and the guarded screen is re-rasterized into a shareable image | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
 | Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) and `DETECT_SCREEN_RECORDING` (auto-granted, Android 15+ only); on Android 9 (API 28) and below, screenshot detection reads the media store and needs `READ_EXTERNAL_STORAGE`, which the host app must request at runtime | Not required |
 
@@ -187,6 +187,35 @@ Screen-recording detection observes `UIScreen.capturedDidChangeNotification`
 and reads `UIScreen.isCaptured`, so it also reports screen mirroring (for
 example AirPlay). The simulator always reports `isCaptured == true`, so it is
 treated as not recording.
+
+### How `preventCapture` works on iOS
+
+iOS has no public API for blocking screenshots. The implementation relies on a
+`UITextField` with `isSecureTextEntry` set to `true`: UIKit renders such a field
+through a private, capture-excluded canvas layer. That layer only protects its
+own content, so the app's content layer is nested inside it. Merely adding the
+secure field next to the app content - as this package did before 0.1.5 -
+protects nothing but the empty field itself, which is why screenshots stayed
+visible.
+
+The field is sized to the window and inserted at the window's origin so the
+canvas layer's coordinate space matches the window's; the content layer keeps
+its frame across the move. While protection is enabled the guarded screen comes
+out blank in screenshots, screen recordings and the app-switcher snapshot, and
+`onScreenshotDetected` still fires so the guarded screen can be re-rasterized
+into a shareable image.
+
+This depends on undocumented UIKit behaviour, so a future iOS release can break
+it, and it may be judged risky in App Store review. Verify it on every iOS
+version you support, and keep `preventCapture: false` (detect-and-notify mode)
+as the fallback: [`captureOnScreenshot`](#detect-and-notify-mode) still hands
+you a PNG of the guarded screen even when the OS frame is not blanked.
+
+Note that `xcrun simctl io screenshot` (and any tool that reads the simulator
+framebuffer directly) is never masked - it will show the app even when
+protection is working, so it cannot be used to test this. Check on a device, or
+with the simulator's own screenshot service
+(`Device > Trigger Screenshot`).
 
 ## Example app
 

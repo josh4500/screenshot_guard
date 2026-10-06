@@ -1,3 +1,14 @@
+## Unreleased
+
+* iOS: fix `preventCapture` not blanking screenshots. The secure text field was
+  added as a sibling subview of the window, which protects only the (empty)
+  field itself; the app's content layer is now nested inside the field's
+  capture-excluded canvas layer, so screenshots and screen recordings of the
+  guarded screen come out blank. The content layer is restored exactly when
+  protection is released, and the window is now resolved from the
+  foreground-active scene. This relies on undocumented UIKit behaviour and can
+  break on a future iOS release.
+
 ## 0.1.4
 
 * Add `ScreenshotShield.onScreenRecordingChanged`, a `Stream<bool>` that emits

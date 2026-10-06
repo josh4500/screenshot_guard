@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -28,11 +29,36 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final ScreenshotShield shield = ScreenshotShield();
+  StreamSubscription<bool>? screenRecordingSubscription;
   bool preventCapture = true;
   bool detectScreenshots = true;
   bool backgroundBlur = false;
   DateTime? lastDetected;
   Uint8List? lastImage;
+  bool isScreenRecording = false;
+  bool hasScreenRecordingState = false;
+
+  @override
+  void initState() {
+    super.initState();
+    screenRecordingSubscription = shield.onScreenRecordingChanged.listen((
+      value,
+    ) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        isScreenRecording = value;
+        hasScreenRecordingState = true;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    screenRecordingSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +137,28 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const _SectionLabel('Screen recording'),
+            Card(
+              child: ListTile(
+                leading: Icon(
+                  isScreenRecording
+                      ? Icons.fiber_manual_record
+                      : Icons.videocam_off_outlined,
+                  color: isScreenRecording ? Colors.red : null,
+                ),
+                title: Text(
+                  !hasScreenRecordingState
+                      ? 'Waiting for a platform event...'
+                      : isScreenRecording
+                      ? 'The screen is being recorded'
+                      : 'The screen is not being recorded',
+                ),
+                subtitle: const Text(
+                  'Android 15+, iOS; best-effort on Windows and Linux',
                 ),
               ),
             ),

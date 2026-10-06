@@ -7,6 +7,9 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     private var screenshotObserver: NSObjectProtocol?
     private var screenRecordingObserver: NSObjectProtocol?
     private var secureTextField: UITextField?
+    private var protectedContentView: UIView?
+    private weak var protectedContentSuperlayer: CALayer?
+    private weak var protectedContainerLayer: CALayer?
     private var backgroundBlurEnabled = false
     private var backgroundBlurView: UIVisualEffectView?
     private var backgroundObserverTokens: [NSObjectProtocol] = []
@@ -78,19 +81,133 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
 
     public func setProtected(protected: Bool) throws {
         if protected {
-            // A window containing a secure text entry field is excluded from
-            // system snapshots, so user screenshots of the app come out blank.
-            guard let window = Self.keyWindow(), secureTextField == nil else { return }
-            let field = UITextField()
-            field.isSecureTextEntry = true
-            field.isUserInteractionEnabled = false
-            field.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
-            window.addSubview(field)
-            secureTextField = field
+            enableCaptureProtection()
         } else {
-            secureTextField?.removeFromSuperview()
-            secureTextField = nil
+            disableCaptureProtection()
         }
+    }
+
+    // MARK: - Capture protection
+
+    /// Blanks screenshots and screen recordings of the app.
+    ///
+    /// iOS has no public API for this. The workaround is a `UITextField` with
+    /// `isSecureTextEntry` enabled: UIKit renders such a field through a
+    /// private, capture-excluded canvas layer. The canvas only protects its own
+    /// content, so the app's content layer is re-parented into it. Simply adding
+    /// a secure field as a sibling subview - which this plugin used to do -
+    /// protects nothing but the (empty) field itself, so screenshots still show
+    /// the app.
+    ///
+    /// The field is sized to the window and inserted at origin (0, 0) so the
+    /// canvas layer's coordinate space matches the window's. That keeps the
+    /// content layer's frame valid across the move and lets UIKit keep applying
+    /// `view.frame` updates without shifting the content.
+    private func enableCaptureProtection() {
+        if let contentView = protectedContentView, let container = protectedContainerLayer {
+            // Re-assert the nesting: UIKit can rebuild the window's layer tree
+            // (for example while returning from the background), which moves the
+            // content layer back under the window and silently disables the
+            // protection. The guards call this again whenever a guarded screen
+            // becomes active.
+            if contentView.layer.superlayer !== container {
+                contentView.layer.removeFromSuperlayer()
+                container.addSublayer(contentView.layer)
+                contentView.layer.frame = contentView.frame
+                Self.log("capture protection re-asserted")
+            }
+            return
+        }
+        guard secureTextField == nil, protectedContentView == nil else { return }
+        guard let window = Self.keyWindow() else {
+            Self.log("capture protection skipped: no key window yet")
+            return
+        }
+        guard let contentView = window.rootViewController?.view ?? window.subviews.first else {
+            Self.log("capture protection skipped: window has no content view")
+            return
+        }
+
+        let field = UITextField()
+        field.isSecureTextEntry = true
+        field.isUserInteractionEnabled = false
+        field.isAccessibilityElement = false
+        field.frame = window.bounds
+        field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.insertSubview(field, at: 0)
+        window.layoutIfNeeded()
+        field.layoutIfNeeded()
+
+        guard let secureContainer = Self.secureContainerLayer(of: field) else {
+            field.removeFromSuperview()
+            Self.log("capture protection failed: no secure container layer on the text field")
+            return
+        }
+
+        let originalSuperlayer = contentView.layer.superlayer
+        contentView.layer.removeFromSuperlayer()
+        secureContainer.addSublayer(contentView.layer)
+        contentView.layer.frame = contentView.frame
+
+        secureTextField = field
+        protectedContentView = contentView
+        protectedContentSuperlayer = originalSuperlayer
+        protectedContainerLayer = secureContainer
+        Self.log(
+            "capture protection enabled: \(type(of: contentView)) layer nested in "
+                + "\(NSStringFromClass(type(of: secureContainer))), superlayer now "
+                + "\(contentView.layer.superlayer.map { NSStringFromClass(type(of: $0)) } ?? "nil")"
+        )
+    }
+
+    private func disableCaptureProtection() {
+        if let contentView = protectedContentView {
+            contentView.layer.removeFromSuperlayer()
+            let parent = protectedContentSuperlayer ?? Self.keyWindow()?.layer
+            parent?.addSublayer(contentView.layer)
+            contentView.layer.frame = contentView.frame
+            Self.log("capture protection disabled: content layer restored to \(String(describing: parent))")
+        }
+        secureTextField?.removeFromSuperview()
+        secureTextField = nil
+        protectedContentView = nil
+        protectedContentSuperlayer = nil
+        protectedContainerLayer = nil
+    }
+
+    /// The private capture-excluded layer UIKit builds inside a secure text
+    /// field. It is exposed as a subview (historically
+    /// `_UITextLayoutCanvasView`) that fills the field's bounds, so the field's
+    /// last sublayer is used as a fallback.
+    private static func secureContainerLayer(of field: UITextField) -> CALayer? {
+        if let canvas = secureCanvasView(in: field) {
+            log("secure canvas view: \(NSStringFromClass(type(of: canvas)))")
+            return canvas.layer
+        }
+        let subviews = field.subviews.map { NSStringFromClass(type(of: $0)) }
+        log("no secure canvas view on the text field; subviews: \(subviews)")
+        return field.layer.sublayers?.last
+    }
+
+    private static func secureCanvasView(in view: UIView) -> UIView? {
+        for subview in view.subviews {
+            if NSStringFromClass(type(of: subview)).range(of: "canvas", options: .caseInsensitive) != nil {
+                return subview
+            }
+            if let match = secureCanvasView(in: subview) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    /// Diagnostics while debugging a device build; `preventCapture` relies on
+    /// undocumented UIKit behaviour, so it is worth being able to see whether
+    /// the content layer was actually nested in the secure container.
+    private static func log(_ message: String) {
+        #if DEBUG
+            NSLog("[ScreenshotShield] \(message)")
+        #endif
     }
 
     public func setBackgroundBlur(blurEnabled: Bool) throws {
@@ -162,14 +279,19 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     }
 
     private static func keyWindow() -> UIWindow? {
+        var fallback: UIWindow?
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
-            if let window = windowScene.windows.first(where: { $0.isKeyWindow }) {
+            if windowScene.activationState == .foregroundActive,
+                let window = windowScene.windows.first(where: { $0.isKeyWindow })
+            {
                 return window
             }
-            return windowScene.windows.first
+            if fallback == nil {
+                fallback = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first
+            }
         }
-        return nil
+        return fallback
     }
 
     deinit {
@@ -182,7 +304,7 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         for token in backgroundObserverTokens {
             NotificationCenter.default.removeObserver(token)
         }
-        secureTextField?.removeFromSuperview()
+        disableCaptureProtection()
     }
 }
 
