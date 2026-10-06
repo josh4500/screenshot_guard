@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.5
 
 * iOS: fix `preventCapture` not blanking screenshots. The secure text field was
   added as a sibling subview of the window, which protects only the (empty)
@@ -8,6 +8,8 @@
   protection is released, and the window is now resolved from the
   foreground-active scene. This relies on undocumented UIKit behaviour and can
   break on a future iOS release.
+* Reformat the Dart sources with the current formatter so the analysis and
+  formatting checks pass again.
 
 ## 0.1.4
 
