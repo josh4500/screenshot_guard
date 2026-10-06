@@ -40,7 +40,10 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('This screen is protected.\nTry taking a screenshot.'), findsOneWidget);
+    expect(
+      find.text('This screen is protected.\nTry taking a screenshot.'),
+      findsOneWidget,
+    );
     expect(find.text('No screenshot detected yet.'), findsOneWidget);
   });
 }

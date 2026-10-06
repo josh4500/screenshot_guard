@@ -12,10 +12,7 @@ void main() {
     });
 
     test('applies prevention on iOS even when detection is enabled', () {
-      expect(
-        shouldPreventCapture(preventCapture: true, detectScreenshots: true, platform: TargetPlatform.iOS),
-        isTrue,
-      );
+      expect(shouldPreventCapture(preventCapture: true, detectScreenshots: true, platform: TargetPlatform.iOS), isTrue);
     });
 
     test('drops prevention on Android so detection can fire', () {
@@ -51,10 +48,7 @@ void main() {
         TargetPlatform.windows,
         TargetPlatform.fuchsia,
       ]) {
-        expect(
-          shouldPreventCapture(preventCapture: true, detectScreenshots: true, platform: platform),
-          isTrue,
-        );
+        expect(shouldPreventCapture(preventCapture: true, detectScreenshots: true, platform: platform), isTrue);
       }
     });
   });

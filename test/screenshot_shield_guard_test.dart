@@ -67,10 +67,7 @@ class _GuardHarnessState extends State<_GuardHarness> {
                 forcePreventCapture: widget.forcePreventCapture,
                 child: const Text('guarded'),
               ),
-              TextButton(
-                onPressed: () => setState(() => _active = !_active),
-                child: const Text('toggle'),
-              ),
+              TextButton(onPressed: () => setState(() => _active = !_active), child: const Text('toggle')),
             ],
           ),
         ),
@@ -90,174 +87,130 @@ void main() {
   });
 
   group('ScreenshotShieldGuard', () {
-    testWidgets(
-      'activates protection and listening while active',
-      (tester) async {
-        await tester.pumpWidget(_GuardHarness(shield: shield));
+    testWidgets('activates protection and listening while active', (tester) async {
+      await tester.pumpWidget(_GuardHarness(shield: shield));
+      await tester.pump();
+
+      expect(platform.calls, contains('startListening'));
+      expect(platform.calls, contains('setProtected:true'));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('releases protection and listening when deactivated', (tester) async {
+      await tester.pumpWidget(_GuardHarness(shield: shield));
+      await tester.pump();
+
+      await tester.tap(find.text('toggle'));
+      await tester.pump();
+
+      expect(platform.calls, contains('setProtected:false'));
+      expect(platform.calls, contains('stopListening'));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('re-activates protection and listening when activated again', (tester) async {
+      await tester.pumpWidget(_GuardHarness(shield: shield));
+      await tester.pump();
+
+      await tester.tap(find.text('toggle'));
+      await tester.pump();
+
+      await tester.tap(find.text('toggle'));
+      await tester.pump();
+
+      expect(platform.calls, contains('setProtected:true'));
+      expect(platform.calls, contains('startListening'));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('invokes onScreenshotDetected while active', (tester) async {
+      var screenshots = 0;
+      await tester.pumpWidget(
+        _GuardHarness(shield: shield, onScreenshotDetected: (_) => screenshots++, captureOnScreenshot: false),
+      );
+      await tester.pump();
+
+      platform.controller.add(null);
+      await tester.pump();
+
+      expect(screenshots, 1);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('does not invoke onScreenshotDetected while inactive', (tester) async {
+      var screenshots = 0;
+      await tester.pumpWidget(
+        _GuardHarness(shield: shield, onScreenshotDetected: (_) => screenshots++, captureOnScreenshot: false),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('toggle'));
+      await tester.pump();
+
+      platform.controller.add(null);
+      await tester.pump();
+
+      expect(screenshots, 0);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('passes a PNG of the guarded subtree to onScreenshotDetected', (tester) async {
+      Uint8List? captured;
+      await tester.pumpWidget(_GuardHarness(shield: shield, onScreenshotDetected: (image) => captured = image));
+      await tester.pump();
+
+      platform.controller.add(null);
+      for (var i = 0; i < 4; i++) {
         await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      }
+      await tester.pump();
 
-        expect(platform.calls, contains('startListening'));
-        expect(platform.calls, contains('setProtected:true'));
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
+      expect(captured, isNotNull);
+      expect(captured!.isNotEmpty, isTrue);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets(
-      'releases protection and listening when deactivated',
-      (tester) async {
-        await tester.pumpWidget(_GuardHarness(shield: shield));
-        await tester.pump();
+    testWidgets('passes null to onScreenshotDetected when captureOnScreenshot is false', (tester) async {
+      Uint8List? captured;
+      await tester.pumpWidget(
+        _GuardHarness(shield: shield, onScreenshotDetected: (image) => captured = image, captureOnScreenshot: false),
+      );
+      await tester.pump();
 
-        await tester.tap(find.text('toggle'));
-        await tester.pump();
+      platform.controller.add(null);
+      await tester.pump();
 
-        expect(platform.calls, contains('setProtected:false'));
-        expect(platform.calls, contains('stopListening'));
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
+      expect(captured, isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets(
-      're-activates protection and listening when activated again',
-      (tester) async {
-        await tester.pumpWidget(_GuardHarness(shield: shield));
-        await tester.pump();
+    testWidgets('releases protection and listening when disposed', (tester) async {
+      await tester.pumpWidget(_GuardHarness(shield: shield));
+      await tester.pump();
 
-        await tester.tap(find.text('toggle'));
-        await tester.pump();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
 
-        await tester.tap(find.text('toggle'));
-        await tester.pump();
+      expect(platform.calls, contains('setProtected:false'));
+      expect(platform.calls, contains('stopListening'));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-        expect(platform.calls, contains('setProtected:true'));
-        expect(platform.calls, contains('startListening'));
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
+    testWidgets('on Android, drops capture prevention so detection can fire when both are requested', (tester) async {
+      await tester.pumpWidget(_GuardHarness(shield: shield));
+      await tester.pump();
 
-    testWidgets(
-      'invokes onScreenshotDetected while active',
-      (tester) async {
-        var screenshots = 0;
-        await tester.pumpWidget(
-          _GuardHarness(shield: shield, onScreenshotDetected: (_) => screenshots++, captureOnScreenshot: false),
-        );
-        await tester.pump();
+      expect(platform.calls, contains('startListening'));
+      expect(platform.calls, isNot(contains('setProtected:true')));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
-        platform.controller.add(null);
-        await tester.pump();
+    testWidgets('on Android, still prevents capture when detection is disabled', (tester) async {
+      await tester.pumpWidget(_GuardHarness(shield: shield, detectScreenshots: false));
+      await tester.pump();
 
-        expect(screenshots, 1);
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
+      expect(platform.calls, contains('setProtected:true'));
+      expect(platform.calls, isNot(contains('startListening')));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
-    testWidgets(
-      'does not invoke onScreenshotDetected while inactive',
-      (tester) async {
-        var screenshots = 0;
-        await tester.pumpWidget(
-          _GuardHarness(shield: shield, onScreenshotDetected: (_) => screenshots++, captureOnScreenshot: false),
-        );
-        await tester.pump();
+    testWidgets('on Android, forcePreventCapture applies prevention even when detection is on', (tester) async {
+      await tester.pumpWidget(_GuardHarness(shield: shield, forcePreventCapture: true));
+      await tester.pump();
 
-        await tester.tap(find.text('toggle'));
-        await tester.pump();
-
-        platform.controller.add(null);
-        await tester.pump();
-
-        expect(screenshots, 0);
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
-
-    testWidgets(
-      'passes a PNG of the guarded subtree to onScreenshotDetected',
-      (tester) async {
-        Uint8List? captured;
-        await tester.pumpWidget(_GuardHarness(shield: shield, onScreenshotDetected: (image) => captured = image));
-        await tester.pump();
-
-        platform.controller.add(null);
-        for (var i = 0; i < 4; i++) {
-          await tester.pump();
-          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-        }
-        await tester.pump();
-
-        expect(captured, isNotNull);
-        expect(captured!.isNotEmpty, isTrue);
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
-
-    testWidgets(
-      'passes null to onScreenshotDetected when captureOnScreenshot is false',
-      (tester) async {
-        Uint8List? captured;
-        await tester.pumpWidget(
-          _GuardHarness(shield: shield, onScreenshotDetected: (image) => captured = image, captureOnScreenshot: false),
-        );
-        await tester.pump();
-
-        platform.controller.add(null);
-        await tester.pump();
-
-        expect(captured, isNull);
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
-
-    testWidgets(
-      'releases protection and listening when disposed',
-      (tester) async {
-        await tester.pumpWidget(_GuardHarness(shield: shield));
-        await tester.pump();
-
-        await tester.pumpWidget(const SizedBox());
-        await tester.pump();
-
-        expect(platform.calls, contains('setProtected:false'));
-        expect(platform.calls, contains('stopListening'));
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-    );
-
-    testWidgets(
-      'on Android, drops capture prevention so detection can fire when both are requested',
-      (tester) async {
-        await tester.pumpWidget(_GuardHarness(shield: shield));
-        await tester.pump();
-
-        expect(platform.calls, contains('startListening'));
-        expect(platform.calls, isNot(contains('setProtected:true')));
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.android),
-    );
-
-    testWidgets(
-      'on Android, still prevents capture when detection is disabled',
-      (tester) async {
-        await tester.pumpWidget(_GuardHarness(shield: shield, detectScreenshots: false));
-        await tester.pump();
-
-        expect(platform.calls, contains('setProtected:true'));
-        expect(platform.calls, isNot(contains('startListening')));
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.android),
-    );
-
-    testWidgets(
-      'on Android, forcePreventCapture applies prevention even when detection is on',
-      (tester) async {
-        await tester.pumpWidget(_GuardHarness(shield: shield, forcePreventCapture: true));
-        await tester.pump();
-
-        expect(platform.calls, contains('startListening'));
-        expect(platform.calls, contains('setProtected:true'));
-      },
-      variant: TargetPlatformVariant.only(TargetPlatform.android),
-    );
+      expect(platform.calls, contains('startListening'));
+      expect(platform.calls, contains('setProtected:true'));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
   });
 }

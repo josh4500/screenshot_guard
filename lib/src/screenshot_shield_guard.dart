@@ -81,12 +81,11 @@ class _ScreenshotShieldGuardState extends State<ScreenshotShieldGuard> {
 
   /// Whether capture prevention should be applied, accounting for the Android
   /// conflict where the secure window flag suppresses screenshot detection.
-  bool get _shouldPrevent =>
-      shouldPreventCapture(
-        preventCapture: widget.preventCapture,
-        detectScreenshots: widget.detectScreenshots,
-        forcePreventCapture: widget.forcePreventCapture,
-      );
+  bool get _shouldPrevent => shouldPreventCapture(
+    preventCapture: widget.preventCapture,
+    detectScreenshots: widget.detectScreenshots,
+    forcePreventCapture: widget.forcePreventCapture,
+  );
 
   @override
   void didChangeDependencies() {
