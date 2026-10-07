@@ -53,8 +53,14 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
     private let imageView = UIImageView()
     private let channel: FlutterMethodChannel
     private var secureField: UITextField?
-    private weak var canvasLayer: CALayer?
-    private weak var originalSuperlayer: CALayer?
+    // `CALayer.superlayer` is imported as `unowned(unsafe)`, so it dangles as
+    // soon as the superlayer is deallocated (UIKit tears the secure field's
+    // internal canvas down when the view leaves the window). These are held
+    // strongly so the layers that the snapshot layer is moved between stay
+    // alive, and `isNested` tracks the move instead of comparing `superlayer`.
+    private var canvasLayer: CALayer?
+    private var originalSuperlayer: CALayer?
+    private var isNested = false
     private var enabled: Bool
     private var lastLoggedSize: CGSize = .zero
     private let viewId: Int64
@@ -78,6 +84,14 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
         container.addSubview(imageView)
         container.onLayout = { [weak self] in
             guard let self else { return }
+            guard self.container.window != nil else {
+                // The view left the hierarchy (the screen is being popped, for
+                // example). Tear the protection down now, while everything is
+                // still alive, instead of re-nesting layers during UIKit's own
+                // teardown or relying on `deinit` to do it.
+                self.removeProtection()
+                return
+            }
             if self.secureField == nil {
                 self.installProtection()
             } else {
@@ -118,8 +132,13 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
     }
 
     deinit {
+        // Deliberately does no teardown of the layer tree. Flutter disposes
+        // platform views from `FlutterPlatformViewsController
+        // computeViewsToDispose`, inside a frame submit: moving layers around
+        // while that runs crashes (EXC_BAD_ACCESS in objc_retain), because the
+        // view is already being torn down. The region's views and layers are
+        // released together, which needs no cleanup.
         channel.setMethodCallHandler(nil)
-        removeProtection()
     }
 
     // MARK: - Capture exclusion
@@ -127,7 +146,7 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
     private func installProtection() {
         // Flutter creates the platform view before it has been given a size, so
         // wait for the first real layout; `onLayout` retries.
-        guard enabled, secureField == nil, !container.bounds.isEmpty else { return }
+        guard enabled, secureField == nil, container.window != nil, !container.bounds.isEmpty else { return }
 
         // The field is added *inside* the region, so the secure canvas inherits
         // every transform and clip Flutter applies to the platform view
@@ -149,7 +168,9 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
 
         secureField = field
         canvasLayer = canvas
-        originalSuperlayer = imageView.layer.superlayer
+        // The snapshot view is a subview of the region, so this is its
+        // superlayer; `container.layer` avoids reading the unsafe property.
+        originalSuperlayer = container.layer
         imageView.frame = container.bounds
         nestSnapshot(in: canvas)
         SecureCanvas.log(
@@ -158,15 +179,23 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
         )
     }
 
+    /// Undoes the capture exclusion. Only called while the region is still
+    /// alive (leaving the window, or being disabled) - never from `deinit`,
+    /// because Flutter disposes platform views from inside its frame submit and
+    /// mutating the layer tree there is unsafe.
     private func removeProtection() {
-        if let original = originalSuperlayer, imageView.layer.superlayer !== original {
+        if isNested {
             imageView.layer.removeFromSuperlayer()
-            original.addSublayer(imageView.layer)
+            originalSuperlayer?.addSublayer(imageView.layer)
+            imageView.layer.frame = imageView.frame
+            isNested = false
         }
         secureField?.removeFromSuperview()
         secureField = nil
         canvasLayer = nil
         originalSuperlayer = nil
+        let state = container.window == nil ? "detached" : "attached"
+        SecureCanvas.log("sensitive view \(viewId): protection removed (\(state))")
     }
 
     /// Re-nests the snapshot layer, which UIKit moves back when it lays the view
@@ -190,10 +219,11 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
     }
 
     private func nestSnapshot(in canvas: CALayer) {
-        if imageView.layer.superlayer !== canvas {
-            imageView.layer.removeFromSuperlayer()
-            canvas.addSublayer(imageView.layer)
-        }
+        // UIKit puts the layer back when it lays the view out, so re-nest every
+        // time rather than trusting `isNested` here.
+        imageView.layer.removeFromSuperlayer()
+        canvas.addSublayer(imageView.layer)
+        isNested = true
         // The canvas sits at the region's origin and matches its bounds, so the
         // snapshot's frame in the canvas equals its frame in the region.
         imageView.layer.frame = imageView.frame
