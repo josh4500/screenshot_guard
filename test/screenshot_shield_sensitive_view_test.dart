@@ -1,12 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
 import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
+import 'package:screenshot_shield/src/screenshot_shield_sensitive_view.dart';
 
 class _FakeShieldPlatform extends ScreenshotShieldPlatform {
+  final StreamController<bool> recording = StreamController<bool>.broadcast();
   final List<String> calls = <String>[];
+
+  @override
+  Stream<bool> get onScreenRecordingChanged => recording.stream;
+
+  @override
+  Future<void> startListening() async => calls.add('startListening');
+
+  @override
+  Future<void> stopListening() async => calls.add('stopListening');
 
   @override
   Future<void> setProtected({required bool protected}) async => calls.add('setProtected:$protected');
@@ -28,9 +41,6 @@ void main() {
 
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       expect(ScreenshotShieldSensitiveView.isSupported, isFalse);
-
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      expect(ScreenshotShieldSensitiveView.isSupported, isFalse);
     });
 
     testWidgets('builds the child directly where there is no native support', (WidgetTester tester) async {
@@ -43,7 +53,7 @@ void main() {
 
       expect(find.text('secret'), findsOneWidget);
       expect(find.byType(UiKitView), findsNothing);
-      expect(find.byType(ColoredBox), findsNothing);
+      expect(find.byType(ScreenshotShieldRegionLayout), findsNothing);
     }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
     testWidgets('leaves the child interactive where there is no native support', (WidgetTester tester) async {
@@ -69,15 +79,17 @@ void main() {
   });
 
   group('on iOS', () {
+    late _FakeShieldPlatform platform;
+    late ScreenshotShield shield;
     late List<MethodCall> viewCalls;
     late bool respondToSnapshots;
-    late int? viewId;
     late int createCalls;
 
     setUp(() {
+      platform = _FakeShieldPlatform();
+      shield = ScreenshotShield(platform: platform);
       viewCalls = <MethodCall>[];
       respondToSnapshots = true;
-      viewId = null;
       createCalls = 0;
       final TestDefaultBinaryMessenger messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       // Kept installed for the whole test (including teardown): disposing the
@@ -85,7 +97,7 @@ void main() {
       messenger.setMockMethodCallHandler(SystemChannels.platform_views, (MethodCall call) async {
         if (call.method == 'create') {
           createCalls++;
-          viewId = (call.arguments as Map<Object?, Object?>)['id'] as int;
+          final int viewId = (call.arguments as Map<Object?, Object?>)['id'] as int;
           if (respondToSnapshots) {
             // The widget addresses its own platform view on a per-view channel.
             messenger.setMockMethodCallHandler(MethodChannel('screenshot_shield/sensitive_view/$viewId'), (
@@ -100,6 +112,10 @@ void main() {
       });
     });
 
+    tearDown(() async {
+      await platform.recording.close();
+    });
+
     /// Lets the rasterise -> channel round trip complete.
     Future<void> settleSnapshot(WidgetTester tester) async {
       for (var i = 0; i < 4; i++) {
@@ -109,49 +125,139 @@ void main() {
       await tester.pump();
     }
 
-    /// How many copies of the subtree have reached the platform view.
+    /// Broadcast events are delivered in a microtask, which can land after the
+    /// frame `pump` started, so rebuild once more.
+    Future<void> emitRecording(WidgetTester tester, bool recording) async {
+      platform.recording.add(recording);
+      await tester.pump();
+      await tester.pump();
+    }
+
     int snapshotCount() => viewCalls.where((MethodCall call) => call.method == 'setSnapshot').length;
 
     Widget region({
-      Color placeholder = const Color(0xFF112233),
       Widget? child,
+      SensitiveProtection protection = SensitiveProtection.whileCaptured,
       bool enabled = true,
       Duration? refreshInterval,
+      Color? captureColor,
+      Color? backdropColor,
     }) {
-      return Directionality(
-        textDirection: TextDirection.ltr,
-        child: Center(
-          child: ScreenshotShieldSensitiveView(
-            placeholderColor: placeholder,
-            enabled: enabled,
-            refreshInterval: refreshInterval,
-            child: child ?? const SizedBox(width: 200, height: 80, child: Text('secret')),
+      return ScreenshotShieldScope(
+        shield: shield,
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: ScreenshotShieldSensitiveView(
+              protection: protection,
+              enabled: enabled,
+              refreshInterval: refreshInterval,
+              captureColor: captureColor,
+              backdropColor: backdropColor,
+              child: child ?? const SizedBox(width: 200, height: 80, child: Text('secret')),
+            ),
           ),
         ),
       );
     }
 
-    testWidgets('does not paint the placeholder before a copy exists', (WidgetTester tester) async {
-      // Rasterising cannot succeed, so the region must keep showing the live
-      // child instead of an opaque rectangle.
-      respondToSnapshots = false;
+    RenderScreenshotShieldRegion renderRegion(WidgetTester tester) =>
+        tester.renderObject<RenderScreenshotShieldRegion>(find.byType(ScreenshotShieldRegionLayout));
 
-      await tester.pumpWidget(region());
-      await settleSnapshot(tester);
+    testWidgets('lays out exactly like the bare child while idle', (WidgetTester tester) async {
+      const Key childKey = Key('child');
+      await tester.pumpWidget(region(child: const SizedBox(key: childKey, width: 120, height: 40)));
+      final Rect regionRect = tester.getRect(find.byKey(childKey));
+      expect(find.byType(UiKitView), findsNothing);
 
-      expect(find.text('secret'), findsOneWidget);
-      expect(find.byType(UiKitView), findsOneWidget);
-      // The placeholder stays in the tree (so the platform view is not rebuilt)
-      // but must be transparent while there is nothing to cover it.
-      final ColoredBox placeholder = tester.widget<ColoredBox>(find.byType(ColoredBox));
-      expect(placeholder.color, const Color(0x00000000));
+      await tester.pumpWidget(
+        const Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(child: SizedBox(key: childKey, width: 120, height: 40)),
+        ),
+      );
+      final Rect bareRect = tester.getRect(find.byKey(childKey));
+
+      expect(regionRect, bareRect);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('sends raw RGBA pixels and their size to its platform view', (WidgetTester tester) async {
+    testWidgets('paints nothing over the subtree until a copy exists', (WidgetTester tester) async {
+      await tester.pumpWidget(region(protection: SensitiveProtection.always));
+
+      expect(find.byType(UiKitView), findsOneWidget);
+      expect(renderRegion(tester).captureColor, isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('engages while the screen is being recorded', (WidgetTester tester) async {
       await tester.pumpWidget(region());
+      expect(find.byType(UiKitView), findsNothing);
+
+      await emitRecording(tester, true);
+      expect(find.byType(UiKitView), findsOneWidget);
+      await settleSnapshot(tester);
+      expect(renderRegion(tester).captureColor, isNotNull);
+
+      await emitRecording(tester, false);
+      expect(find.byType(UiKitView), findsNothing);
+      expect(renderRegion(tester).captureColor, isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('engages while the app is not in the foreground', (WidgetTester tester) async {
+      await tester.pumpWidget(region());
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      expect(find.byType(UiKitView), findsOneWidget);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(find.byType(UiKitView), findsNothing);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('always protection engages without recording', (WidgetTester tester) async {
+      await tester.pumpWidget(region(protection: SensitiveProtection.always));
+
+      expect(find.byType(UiKitView), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('renders the child directly when disabled', (WidgetTester tester) async {
+      await tester.pumpWidget(region(enabled: false, protection: SensitiveProtection.always));
+
+      expect(find.text('secret'), findsOneWidget);
+      expect(find.byType(UiKitView), findsNothing);
+      expect(find.byType(ScreenshotShieldRegionLayout), findsNothing);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('stands down while whole-window prevention is active', (WidgetTester tester) async {
+      await ScreenshotShield(platform: _FakeShieldPlatform()).setProtection(preventCapture: true);
+
+      await tester.pumpWidget(region(protection: SensitiveProtection.always));
+      await tester.pump();
+
+      expect(find.text('secret'), findsOneWidget);
+      expect(find.byType(UiKitView), findsNothing);
+      expect(renderRegion(tester).captureColor, isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('engages when whole-window prevention is released', (WidgetTester tester) async {
+      final ScreenshotShield other = ScreenshotShield(platform: _FakeShieldPlatform());
+      await other.setProtection(preventCapture: true);
+
+      await tester.pumpWidget(region(protection: SensitiveProtection.always));
+      expect(find.byType(UiKitView), findsNothing);
+
+      await other.setProtection(preventCapture: false);
+      await tester.pump();
+      expect(find.byType(UiKitView), findsOneWidget);
+
+      await settleSnapshot(tester);
+      expect(find.byType(UiKitView), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('sends raw RGBA pixels, their size and the backdrop colour', (WidgetTester tester) async {
+      await tester.pumpWidget(region(protection: SensitiveProtection.always, backdropColor: const Color(0xFF445566)));
       await settleSnapshot(tester);
 
-      expect(viewId, isNotNull);
       expect(snapshotCount(), greaterThanOrEqualTo(1));
       final MethodCall snapshot = viewCalls.firstWhere((MethodCall call) => call.method == 'setSnapshot');
       final Map<Object?, Object?> arguments = snapshot.arguments as Map<Object?, Object?>;
@@ -159,40 +265,95 @@ void main() {
       final int width = arguments['width']! as int;
       final int height = arguments['height']! as int;
 
-      expect(width, greaterThan(0));
-      expect(height, greaterThan(0));
-      // Four bytes per pixel: the native side builds the image from them
-      // directly, so no encoding happens per frame.
       expect(bytes.length, width * height * 4);
+      expect(arguments['backdropColor'], const Color(0xFF445566).toARGB32());
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('covers the child with the placeholder once a copy exists', (WidgetTester tester) async {
-      await tester.pumpWidget(region());
+    testWidgets('gives the subtree the constraints it received, unchanged', (WidgetTester tester) async {
+      BoxConstraints? seen;
+      await tester.pumpWidget(
+        ScreenshotShieldScope(
+          shield: shield,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Center(
+              child: SizedBox(
+                width: 200,
+                height: 100,
+                child: ScreenshotShieldSensitiveView(
+                  protection: SensitiveProtection.always,
+                  child: LayoutBuilder(
+                    builder: (BuildContext context, BoxConstraints constraints) {
+                      seen = constraints;
+                      return const SizedBox.shrink();
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // The region receives a tight 200x100 from the SizedBox and has to hand it
+      // to the guarded subtree untouched: a loose stack would report 0 here.
+      expect(seen!.minWidth, 200);
+      expect(seen!.minHeight, 100);
+      expect(seen!.maxHeight, 100);
+      expect(tester.getSize(find.byType(ScreenshotShieldRegionLayout)), const Size(200, 100));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('sizes the overlay exactly like the region', (WidgetTester tester) async {
+      const Key childKey = Key('child');
+      await tester.pumpWidget(
+        region(
+          protection: SensitiveProtection.always,
+          child: const SizedBox(key: childKey, width: 120, height: 40),
+        ),
+      );
       await settleSnapshot(tester);
 
-      // The subtree stays in the tree (it is what gets rasterised), but it is
-      // covered by the opaque placeholder and by the native region.
-      expect(find.text('secret'), findsOneWidget);
-      expect(find.byType(UiKitView), findsOneWidget);
-      final ColoredBox placeholder = tester.widget<ColoredBox>(find.byType(ColoredBox));
-      expect(placeholder.color, const Color(0xFF112233));
+      expect(tester.getSize(find.byType(UiKitView)), tester.getSize(find.byKey(childKey)));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('keeps the child interactive while it is engaged', (WidgetTester tester) async {
+      var taps = 0;
+      await tester.pumpWidget(
+        region(
+          protection: SensitiveProtection.always,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => taps++,
+            child: const SizedBox(width: 200, height: 80),
+          ),
+        ),
+      );
+      await settleSnapshot(tester);
+
+      await tester.tap(find.byType(GestureDetector));
+      await tester.pump();
+
+      expect(taps, 1);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('refreshes the copy when the subtree repaints', (WidgetTester tester) async {
       var value = 0;
       late StateSetter rebuild;
       await tester.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Center(
-            child: StatefulBuilder(
-              builder: (BuildContext context, StateSetter setState) {
-                rebuild = setState;
-                return ScreenshotShieldSensitiveView(
-                  placeholderColor: const Color(0xFF112233),
-                  child: SizedBox(width: 200, height: 80, child: Text('value $value')),
-                );
-              },
+        ScreenshotShieldScope(
+          shield: shield,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Center(
+              child: StatefulBuilder(
+                builder: (BuildContext context, StateSetter setState) {
+                  rebuild = setState;
+                  return ScreenshotShieldSensitiveView(
+                    protection: SensitiveProtection.always,
+                    child: SizedBox(width: 200, height: 80, child: Text('value $value')),
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -209,7 +370,7 @@ void main() {
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('does not refresh while nothing repaints', (WidgetTester tester) async {
-      await tester.pumpWidget(region());
+      await tester.pumpWidget(region(protection: SensitiveProtection.always));
       await settleSnapshot(tester);
       final int afterFirstCopy = snapshotCount();
 
@@ -224,17 +385,20 @@ void main() {
       var width = 200.0;
       late StateSetter rebuild;
       await tester.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Center(
-            child: StatefulBuilder(
-              builder: (BuildContext context, StateSetter setState) {
-                rebuild = setState;
-                return ScreenshotShieldSensitiveView(
-                  placeholderColor: const Color(0xFF112233),
-                  child: SizedBox(width: width, height: 80, child: const Text('secret')),
-                );
-              },
+        ScreenshotShieldScope(
+          shield: shield,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Center(
+              child: StatefulBuilder(
+                builder: (BuildContext context, StateSetter setState) {
+                  rebuild = setState;
+                  return ScreenshotShieldSensitiveView(
+                    protection: SensitiveProtection.always,
+                    child: SizedBox(width: width, height: 80, child: const Text('secret')),
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -254,18 +418,21 @@ void main() {
       var value = 0;
       late StateSetter rebuild;
       await tester.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Center(
-            child: StatefulBuilder(
-              builder: (BuildContext context, StateSetter setState) {
-                rebuild = setState;
-                return ScreenshotShieldSensitiveView(
-                  placeholderColor: const Color(0xFF112233),
-                  refreshInterval: const Duration(seconds: 2),
-                  child: SizedBox(width: 200, height: 80, child: Text('value $value')),
-                );
-              },
+        ScreenshotShieldScope(
+          shield: shield,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Center(
+              child: StatefulBuilder(
+                builder: (BuildContext context, StateSetter setState) {
+                  rebuild = setState;
+                  return ScreenshotShieldSensitiveView(
+                    protection: SensitiveProtection.always,
+                    refreshInterval: const Duration(seconds: 2),
+                    child: SizedBox(width: 200, height: 80, child: Text('value $value')),
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -289,17 +456,20 @@ void main() {
       var value = 0;
       late StateSetter rebuild;
       await tester.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Center(
-            child: StatefulBuilder(
-              builder: (BuildContext context, StateSetter setState) {
-                rebuild = setState;
-                return ScreenshotShieldSensitiveView(
-                  placeholderColor: const Color(0xFF112233),
-                  child: SizedBox(width: 200, height: 80, child: Text('value $value')),
-                );
-              },
+        ScreenshotShieldScope(
+          shield: shield,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Center(
+              child: StatefulBuilder(
+                builder: (BuildContext context, StateSetter setState) {
+                  rebuild = setState;
+                  return ScreenshotShieldSensitiveView(
+                    protection: SensitiveProtection.always,
+                    child: SizedBox(width: 200, height: 80, child: Text('value $value')),
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -310,68 +480,23 @@ void main() {
       await tester.pump();
       await settleSnapshot(tester);
 
-      expect(find.byType(ColoredBox), findsOneWidget);
-      // A placeholder that appeared/disappeared with the copy state would rebuild
-      // the platform view and loop forever.
       expect(createCalls, 1);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('keeps the child interactive while it is protected', (WidgetTester tester) async {
-      var taps = 0;
-      await tester.pumpWidget(
-        region(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => taps++,
-            child: const SizedBox(width: 200, height: 80),
-          ),
-        ),
-      );
-      await settleSnapshot(tester);
-      // The placeholder is painted, and must still not swallow the tap.
-      expect(find.byType(ColoredBox), findsOneWidget);
-
-      await tester.tap(find.byType(GestureDetector));
-      await tester.pump();
-
-      expect(taps, 1);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
-
-    testWidgets('stands down while whole-window prevention is enabled', (WidgetTester tester) async {
-      await ScreenshotShield(platform: _FakeShieldPlatform()).setProtection(preventCapture: true);
-
+    testWidgets('listens for recordings while watching, and stops on dispose', (WidgetTester tester) async {
       await tester.pumpWidget(region());
+      expect(platform.calls, contains('startListening'));
+
+      await tester.pumpWidget(const SizedBox());
       await tester.pump();
 
-      // No platform view, no placeholder, and no rasterising: the window is
-      // already excluded from captures.
-      expect(find.text('secret'), findsOneWidget);
-      expect(find.byType(UiKitView), findsNothing);
-      expect(find.byType(ColoredBox), findsNothing);
+      expect(platform.calls, contains('stopListening'));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('activates when whole-window prevention is released', (WidgetTester tester) async {
-      final ScreenshotShield shield = ScreenshotShield(platform: _FakeShieldPlatform());
-      await shield.setProtection(preventCapture: true);
+    testWidgets('does not listen when it never watches for recordings', (WidgetTester tester) async {
+      await tester.pumpWidget(region(protection: SensitiveProtection.always));
 
-      await tester.pumpWidget(region());
-      await tester.pump();
-      expect(find.byType(UiKitView), findsNothing);
-
-      await shield.setProtection(preventCapture: false);
-      await tester.pump();
-      expect(find.byType(UiKitView), findsOneWidget);
-
-      await settleSnapshot(tester);
-      expect(find.byType(ColoredBox), findsOneWidget);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
-
-    testWidgets('renders the child directly when it is disabled', (WidgetTester tester) async {
-      await tester.pumpWidget(region(enabled: false));
-
-      expect(find.text('secret'), findsOneWidget);
-      expect(find.byType(UiKitView), findsNothing);
-      expect(find.byType(ColoredBox), findsNothing);
+      expect(platform.calls, isNot(contains('startListening')));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
   });
 }

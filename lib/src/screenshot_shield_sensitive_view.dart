@@ -8,62 +8,94 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
 
-/// iOS only: keeps its subtree out of screenshots, screen recordings and the
-/// app-switcher snapshot, while the rest of the app stays capturable.
+/// When [ScreenshotShieldSensitiveView] keeps the region out of captures.
+enum SensitiveProtection {
+  /// The region is protected while the screen is being recorded or mirrored and
+  /// while the app is not in the foreground (which is what keeps it out of the
+  /// app-switcher snapshot). This is the default.
+  ///
+  /// The original widget is what is on screen the rest of the time - nothing is
+  /// wrapped, rasterised or overlaid - so a screenshot taken while the app is in
+  /// the foreground is **not** covered. Use whole-window protection
+  /// ([ScreenshotShield.setProtection] with `preventCapture: true`, or a
+  /// [ScreenshotShieldRouteGuard]) on screens where a screenshot must come out
+  /// blank.
+  whileCaptured,
+
+  /// The region is protected whenever it is mounted, which also blanks
+  /// foreground screenshots.
+  ///
+  /// What the user sees while it is on is a continuously refreshed copy of the
+  /// subtree displayed inside the capture-excluded canvas, because that is the
+  /// only thing iOS can keep out of a capture (live Flutter pixels are one
+  /// surface and cannot be excluded per region). That copy is refreshed whenever
+  /// the subtree repaints, but it is still a copy: Flutter overlays that cover
+  /// the region (a selection toolbar, a dialog, a tooltip) render behind it, and
+  /// rasterising costs a GPU readback per refresh.
+  always,
+}
+
+/// iOS only: keeps its subtree out of captures while the screen is being
+/// recorded or mirrored, and while the app is in the background.
 ///
-/// `ScreenshotShield.setProtection(preventCapture: true)` blanks the whole
-/// window; this widget protects a single region. Flutter renders every widget
-/// into one surface and iOS only excludes a *native view's own layer* from a
-/// capture, so a region can only be excluded by giving it a native view: the
-/// subtree is rasterised in Flutter and the result is displayed by a platform
-/// view whose layer is nested in its own capture-excluded canvas. What the user
-/// sees is therefore a copy of the subtree - but a copy that is refreshed
-/// **whenever the subtree repaints**, at most once per frame, so typing, a
-/// blinking caret, animations and layout or size changes all show up (unlike a
-/// one-shot snapshot, which freezes the region and stretches it when it
-/// resizes). A capture of the region gets no pixels at all.
+/// By default the widget is invisible in the tree: it wraps [child] in a
+/// layout-neutral box that paints nothing, creates no platform view and
+/// rasterises nothing, and it only takes over while protection is needed
+/// ([SensitiveProtection.whileCaptured]):
 ///
-/// What a capture sees instead is [ScreenshotShieldSensitiveView.placeholderColor],
-/// which is also what shows through any transparent part of the subtree on
-/// screen, so it defaults to the ambient [ThemeData.scaffoldBackgroundColor] and
-/// should be set when the region sits on a gradient, an image or a card.
+/// * while the screen is being recorded or mirrored
+///   ([ScreenshotShield.onScreenRecordingChanged]: `UIScreen.isCaptured` on iOS,
+///   which is also `true` while mirroring, and the Android 15 recording
+///   callback), and
+/// * while the app is not in the foreground, which keeps the region out of the
+///   app-switcher snapshot.
 ///
-/// The subtree stays laid out and stays live: the platform view and the
-/// placeholder are transparent to pointers, so taps, drags, focus and text input
-/// reach [child] as usual - the copy is what the user sees, [child] is what the
-/// user is interacting with. Until the first copy lands the placeholder is not
-/// painted at all, so the region shows the live subtree and is simply not
-/// excluded from captures yet.
+/// While it is engaged, the guard is a platform view whose layer is nested in its
+/// own capture-excluded canvas: a capture gets no pixels from the region and
+/// instead shows [captureColor] - black by default - painted behind it, while the
+/// user keeps seeing the subtree as a continuously refreshed copy composited over
+/// [backdropColor]. The copy tracks the live subtree (typing, carets, animations
+/// and size changes) because it is re-rasterised whenever the subtree repaints,
+/// at most once per frame, and `refreshInterval` can cap that rate for content
+/// that repaints continuously.
 ///
-/// Things to know before relying on it:
+/// Why a copy at all: iOS excludes a *native view's own layer* from captures, and
+/// Flutter renders every widget into one surface. Nesting live Flutter content in
+/// the excluded canvas is therefore impossible, so the pixels the user sees while
+/// the region is blank in a capture have to come from a native view - a
+/// rasterised copy of the subtree. A "shield" that is transparent on screen and
+/// black in the capture cannot exist: an excluded layer is *omitted* from the
+/// capture, so a transparent shield would simply reveal the live widget to the
+/// capture as well.
 ///
-/// * The region is a native view, so it composites above the rest of the Flutter
-///   content: a Flutter overlay that covers the region (a selection toolbar, a
-///   dialog, a tooltip) is drawn behind it. Keep overlays out of the region, or
-///   put the region on a screen that uses whole-window protection instead.
-/// * Rasterising costs a GPU readback per refresh, so a region containing
-///   something that repaints continuously (video, a large animation) keeps the
-///   CPU busy. Use [refreshInterval] to cap how often the copy is refreshed, or
-///   use whole-window protection for content like that.
-/// * The copy is one frame behind, and it is still a copy: hit-testing, focus and
-///   text input happen in the live subtree underneath.
+/// What the user is interacting with is always the live subtree: the copy and the
+/// capture canvas are transparent to pointers, so taps, drags, focus and text
+/// input reach [child] normally. Until the first copy lands nothing opaque is
+/// painted, so the region shows the live subtree and is simply not excluded from
+/// captures yet.
+///
+/// Things to know while the region is engaged:
+///
+/// * It is a native view, so it composites above the rest of the Flutter content:
+///   a Flutter overlay that covers the region (a selection toolbar, a dialog, a
+///   tooltip) is drawn behind it.
+/// * The copy is one frame behind, and rasterising costs a GPU readback per
+///   refresh, so content that repaints continuously (video, a large animation)
+///   keeps the CPU busy while it is engaged. Use [refreshInterval] to cap it.
+/// * [SensitiveProtection.always] keeps all of this on permanently, in exchange
+///   for also blanking foreground screenshots.
 /// * It derives from the same undocumented UIKit behaviour as the whole-window
 ///   protection, so it can break on any iOS release, and the exclusion itself can
 ///   only be confirmed on a real device (`xcrun simctl io screenshot` cannot show
 ///   it).
 ///
-/// On every other platform (and in tests) the widget is a no-op and builds
-/// [child] directly. It also stands down while whole-window prevention is active
-/// (`ScreenshotShield.setProtection(preventCapture: true)`, which is what the
-/// guards enable), because the window is excluded from captures anyway: no
-/// platform view is created and nothing is rasterised.
+/// Whole-window protection (`preventCapture: true`, which is what the guards
+/// enable) makes the region redundant: it stands down while that is active, and
+/// nothing is rasterised. On platforms other than iOS, and when [enabled] is
+/// false, the widget builds [child] directly.
 ///
 /// ```dart
 /// ScreenshotShieldSensitiveView(
-///   // Defaults to the scaffold background; set it when the region sits on
-///   // something else, because it also shows through transparent parts of the
-///   // child.
-///   placeholderColor: Color(0xFFF4F1EC),
 ///   child: Text('Account number: 1234'),
 /// )
 /// ```
@@ -72,26 +104,39 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
   const ScreenshotShieldSensitiveView({
     super.key,
     required this.child,
-    this.placeholderColor,
+    this.captureColor,
+    this.backdropColor,
+    this.protection = SensitiveProtection.whileCaptured,
     this.refreshInterval,
     this.enabled = true,
     this.controller,
   });
 
-  /// The subtree to keep out of captures. It stays live, laid out and
-  /// interactive; the user sees a continuously refreshed copy of it.
+  /// The subtree to keep out of captures.
+  ///
+  /// It stays live, laid out and interactive: the user interacts with this, and
+  /// it is what gets rasterised into the copy the user sees while the region is
+  /// engaged.
   final Widget child;
 
-  /// What a capture shows in place of [child], and what shows through any part
-  /// of [child] that is transparent - which is why it has to match what is
-  /// behind the region.
+  /// What a capture shows where the region is. Defaults to black.
   ///
-  /// Defaults to the ambient [ThemeData.scaffoldBackgroundColor], which is what
-  /// most regions sit on. Set it explicitly when the region sits on something
-  /// else (a gradient, an image, a card), otherwise those transparent parts show
-  /// this colour on screen. It must stay opaque: it is the only thing standing
-  /// between a capture and the rasterised subtree.
-  final Color? placeholderColor;
+  /// It is painted in Flutter behind the capture-excluded canvas, so the user
+  /// never sees it (the canvas covers it with the copy over [backdropColor]); a
+  /// capture does, because the excluded canvas contributes nothing to it.
+  final Color? captureColor;
+
+  /// What the user sees behind the copy, where [child] is transparent (the gaps
+  /// between rounded cells, for example).
+  ///
+  /// Defaults to the ambient [ThemeData.scaffoldBackgroundColor]. It is painted
+  /// *inside* the capture-excluded canvas, so it is visible to the user but not
+  /// to a capture.
+  final Color? backdropColor;
+
+  /// When the region is kept out of captures. Defaults to
+  /// [SensitiveProtection.whileCaptured].
+  final SensitiveProtection protection;
 
   /// The minimum time between two refreshes of the copy, or `null` (the default)
   /// to refresh on every frame in which the subtree repaints.
@@ -101,7 +146,8 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
   /// responsive copy.
   final Duration? refreshInterval;
 
-  /// Whether the region is currently excluded from captures.
+  /// Whether the region may protect at all. When false the widget builds [child]
+  /// directly.
   final bool enabled;
 
   /// Optional handle for refreshing the copy on demand.
@@ -130,7 +176,7 @@ class ScreenshotShieldSensitiveViewController {
   /// capture is in flight are coalesced into one more capture rather than
   /// dropped.
   ///
-  /// Does nothing when the widget is not using a platform view.
+  /// Does nothing when the region is not engaged.
   void refresh() {
     _state?.scheduleRefresh();
   }
@@ -146,61 +192,64 @@ class ScreenshotShieldSensitiveViewController {
   }
 }
 
-class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiveView> {
+class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiveView> with WidgetsBindingObserver {
   static const String _viewType = 'screenshot_shield/sensitive_view';
 
   /// How often the first copy is retried until it succeeds. Until then the region
-  /// shows the live child rather than the capture placeholder.
+  /// shows the live child rather than an opaque rectangle.
   static const Duration _firstSnapshotRetryInterval = Duration(milliseconds: 250);
 
   final GlobalKey _boundaryKey = GlobalKey();
+  ScreenshotShield? _shield;
+  ScreenshotShield? _fallbackShield;
+  StreamSubscription<bool>? _recordingSubscription;
   MethodChannel? _channel;
   Timer? _retryTimer;
   Timer? _throttleTimer;
+  bool _listening = false;
+  bool _recording = false;
+  bool _foreground = true;
   bool _capturing = false;
   bool _refreshQueued = false;
   Duration? _lastRefresh;
 
   /// Whether the native view has received a copy of the subtree yet.
   ///
-  /// The placeholder is what a *capture* should see, so it is only painted once
-  /// there is a copy covering it; before that the live child is shown instead of
-  /// an opaque rectangle, and a region whose copy cannot be taken stays visible
-  /// rather than going blank.
+  /// Nothing opaque is painted before that: the region shows the live subtree and
+  /// is simply not excluded from captures yet, rather than going blank.
   bool _snapshotReady = false;
 
-  /// Whether this region needs its own native protection.
-  ///
-  /// It does not when the whole window is already excluded from captures by
-  /// `ScreenshotShield.setProtection(preventCapture: true)`: the region would be
-  /// blanked anyway, so the platform view, the rasterising and the placeholder
-  /// are all skipped.
-  bool get _usesPlatformView =>
-      ScreenshotShieldSensitiveView.isSupported && widget.enabled && !ScreenshotShield.preventCaptureActive.value;
+  /// The colour a capture shows in the region.
+  Color get _captureColor => widget.captureColor ?? const Color(0xFF000000);
 
-  /// The colour a capture shows in the region, and what shows through the
-  /// transparent parts of [ScreenshotShieldSensitiveView.child] on screen.
-  Color get _placeholderColor => widget.placeholderColor ?? Theme.of(context).scaffoldBackgroundColor;
+  /// What the user sees behind the copy, inside the capture-excluded canvas.
+  Color get _backdropColor => widget.backdropColor ?? Theme.of(context).scaffoldBackgroundColor;
+
+  /// Whether the recording state has to be watched.
+  bool get _watchesRecording => widget.protection == SensitiveProtection.whileCaptured;
+
+  /// Whether the region is currently kept out of captures.
+  bool get _engaged =>
+      ScreenshotShieldSensitiveView.isSupported &&
+      widget.enabled &&
+      !ScreenshotShield.preventCaptureActive.value &&
+      (_watchesRecording ? (_recording || !_foreground) : true);
 
   @override
   void initState() {
     super.initState();
     widget.controller?._attach(this);
+    WidgetsBinding.instance.addObserver(this);
+    _foreground =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     ScreenshotShield.preventCaptureActive.addListener(_handlePreventCaptureChanged);
   }
 
-  /// Stops (or resumes) the region when whole-window protection is toggled. The
-  /// rebuild itself is driven by the [ValueListenableBuilder] in [build].
-  void _handlePreventCaptureChanged() {
-    if (ScreenshotShield.preventCaptureActive.value) {
-      // The native view is being torn down with the rebuild; stop talking to it.
-      _channel = null;
-      _snapshotReady = false;
-      _retryTimer?.cancel();
-      _throttleTimer?.cancel();
-    } else {
-      _restartRetryTimer();
-    }
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncShield();
   }
 
   @override
@@ -210,41 +259,119 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
       oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
     }
+    if (oldWidget.protection != widget.protection || oldWidget.enabled != widget.enabled) {
+      _syncShield();
+    } else {
+      _syncEngagement();
+    }
     if (oldWidget.refreshInterval != widget.refreshInterval) {
       _throttleTimer?.cancel();
       _throttleTimer = null;
       scheduleRefresh();
-    }
-    if (oldWidget.enabled != widget.enabled) {
-      if (widget.enabled) {
-        unawaited(_setEnabled(true));
-        _restartRetryTimer();
-      } else {
-        _retryTimer?.cancel();
-        unawaited(_setEnabled(false));
-      }
     }
   }
 
   @override
   void dispose() {
     widget.controller?._detach(this);
+    WidgetsBinding.instance.removeObserver(this);
     ScreenshotShield.preventCaptureActive.removeListener(_handlePreventCaptureChanged);
+    _recordingSubscription?.cancel();
+    if (_listening) {
+      unawaited(_shield?.stopListening());
+    }
     _retryTimer?.cancel();
     _throttleTimer?.cancel();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final bool foreground = state == AppLifecycleState.resumed;
+    if (foreground == _foreground || !mounted) {
+      return;
+    }
+    setState(() => _foreground = foreground);
+    _syncEngagement();
+  }
+
+  /// Stops (or resumes) the region when whole-window protection is toggled.
+  void _handlePreventCaptureChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    _syncEngagement();
+  }
+
+  /// Resolves the [ScreenshotShield] and subscribes to the recording state before
+  /// asking for listening, so the state the host reports when listening starts is
+  /// not missed.
+  void _syncShield() {
+    final ScreenshotShieldScope? scope = context.dependOnInheritedWidgetOfExactType<ScreenshotShieldScope>();
+    final ScreenshotShield shield = scope?.shield ?? (_fallbackShield ??= ScreenshotShield());
+    _recordingSubscription?.cancel();
+    _recordingSubscription = null;
+    _shield = shield;
+    if (_watchesRecording) {
+      _recordingSubscription = shield.onScreenRecordingChanged.listen(_handleRecordingChanged);
+    } else {
+      _recording = false;
+    }
+    _updateListening();
+    _syncEngagement();
+  }
+
+  void _handleRecordingChanged(bool recording) {
+    if (!mounted || recording == _recording) {
+      return;
+    }
+    setState(() => _recording = recording);
+    _syncEngagement();
+  }
+
+  void _updateListening() {
+    final ScreenshotShield? shield = _shield;
+    if (shield == null) {
+      return;
+    }
+    if (_watchesRecording && !_listening) {
+      _listening = true;
+      unawaited(shield.startListening());
+    } else if (!_watchesRecording && _listening) {
+      _listening = false;
+      unawaited(shield.stopListening());
+    }
+  }
+
+  /// Keeps the Dart-side resources in step with whether the region is engaged.
+  ///
+  /// The tree itself is rebuilt by the state change that led here (or by
+  /// `didUpdateWidget`); this only takes down what the platform view was using, so
+  /// a disengaged region costs nothing.
+  void _syncEngagement() {
+    if (!_engaged) {
+      // The platform view is removed by the rebuild; stop talking to it and drop
+      // the copy state.
+      _channel = null;
+      _snapshotReady = false;
+      _retryTimer?.cancel();
+      _throttleTimer?.cancel();
+      return;
+    }
+    _restartRetryTimer();
+  }
+
   void _handlePlatformViewCreated(int id) {
     _channel = MethodChannel('$_viewType/$id');
-    // A fresh native view has no copy, so drop the placeholder until the capture
-    // below lands (otherwise an opaque rectangle covers the region).
+    // A fresh native view has no copy, so nothing opaque is painted until the
+    // capture below lands (otherwise a rectangle would cover the region).
     if (_snapshotReady && mounted) {
       setState(() => _snapshotReady = false);
     } else {
       _snapshotReady = false;
     }
-    unawaited(_setEnabled(widget.enabled));
+    unawaited(_setEnabled(true));
     scheduleRefresh();
     // Retry until the first copy lands, so the region does not stay unprotected
     // just because it was first laid out while it could not be rasterised (off
@@ -255,7 +382,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
   /// Called from the render object inside the repaint boundary whenever the
   /// guarded subtree paints, which is what keeps the copy live.
   void _handleSubtreePainted() {
-    if (!_usesPlatformView) {
+    if (!_engaged) {
       return;
     }
     final Duration? interval = widget.refreshInterval;
@@ -279,7 +406,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
 
   /// Schedules a capture after the next frame, coalescing bursts of requests.
   void scheduleRefresh() {
-    if (!mounted || _refreshQueued) {
+    if (!mounted || _refreshQueued || !_engaged) {
       return;
     }
     _refreshQueued = true;
@@ -288,8 +415,8 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
       unawaited(refresh());
     });
     // Adding a post-frame callback does not ask for a frame, and a refresh can be
-    // scheduled from outside one (the throttle timer, a resize notification, the
-    // controller); without this the last state could never reach the native view.
+    // scheduled from outside one (the throttle timer, a resize, the controller);
+    // without this the last state could never reach the native view.
     WidgetsBinding.instance.scheduleFrame();
   }
 
@@ -305,7 +432,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
 
   void _restartRetryTimer() {
     _retryTimer?.cancel();
-    if (!_usesPlatformView || _snapshotReady) {
+    if (!_engaged || _snapshotReady) {
       return;
     }
     _retryTimer = Timer.periodic(_firstSnapshotRetryInterval, (_) => unawaited(refresh()));
@@ -314,7 +441,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
   /// Rasterises the guarded subtree and hands the copy to the native view.
   Future<void> refresh() async {
     final MethodChannel? channel = _channel;
-    if (channel == null || !mounted) {
+    if (channel == null || !mounted || !_engaged) {
       return;
     }
     if (_capturing) {
@@ -324,9 +451,6 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     }
     final RenderObject? renderObject = _boundaryKey.currentContext?.findRenderObject();
     if (renderObject is! RenderRepaintBoundary || renderObject.debugNeedsPaint || renderObject.size.isEmpty) {
-      debugPrint(
-        'T refresh bail renderObject=$renderObject needsPaint=${renderObject is RenderRepaintBoundary ? renderObject.debugNeedsPaint : null} size=${renderObject?.paintBounds.size}',
-      );
       return;
     }
     _capturing = true;
@@ -344,6 +468,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
           'bytes': data.buffer.asUint8List(),
           'width': image.width,
           'height': image.height,
+          'backdropColor': _backdropColor.toARGB32(),
         });
         if (mounted && !_snapshotReady) {
           setState(() => _snapshotReady = true);
@@ -366,69 +491,178 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     }
   }
 
-  /// Re-rasterises when the region is laid out at a new size, so a resized region
-  /// is never stretched from a stale copy.
-  bool _handleSizeChanged(SizeChangedLayoutNotification notification) {
-    scheduleRefresh();
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
     if (!ScreenshotShieldSensitiveView.isSupported || !widget.enabled) {
       return widget.child;
     }
-    return ValueListenableBuilder<bool>(
-      valueListenable: ScreenshotShield.preventCaptureActive,
-      builder: (BuildContext context, bool preventCaptureActive, Widget? _) {
-        if (preventCaptureActive) {
-          // The whole window is already excluded from captures.
-          return widget.child;
-        }
-        return _buildProtectedRegion();
-      },
+    final bool engaged = _engaged;
+    return ScreenshotShieldRegionLayout(
+      captureColor: engaged && _snapshotReady ? _captureColor : null,
+      onSubtreeSizeChanged: scheduleRefresh,
+      children: <Widget>[
+        // Always at the same position in the element tree, so engaging and
+        // disengaging never rebuilds - or loses the state of - the wrapped widget.
+        // It is also the source of the copy.
+        RepaintBoundary(
+          key: _boundaryKey,
+          child: _RepaintNotifier(onPaint: _handleSubtreePainted, child: widget.child),
+        ),
+        // What the user sees while the region is engaged: the rasterised subtree,
+        // excluded from captures by the native view. Only in the tree while it is
+        // needed, so an unengaged region creates no platform view at all.
+        if (engaged)
+          UiKitView(
+            viewType: _viewType,
+            creationParams: <String, dynamic>{'enabled': true},
+            creationParamsCodec: const StandardMessageCodec(),
+            hitTestBehavior: .transparent,
+            onPlatformViewCreated: _handlePlatformViewCreated,
+          ),
+      ],
     );
   }
+}
 
-  Widget _buildProtectedRegion() {
-    return NotificationListener<SizeChangedLayoutNotification>(
-      onNotification: _handleSizeChanged,
-      child: Stack(
-        clipBehavior: Clip.hardEdge,
-        children: <Widget>[
-          // Rasterised into the native view, and the live, interactive widget:
-          // the platform view and the placeholder are transparent to pointers,
-          // so taps, drags and focus reach this subtree.
-          SizeChangedLayoutNotifier(
-            child: RepaintBoundary(
-              key: _boundaryKey,
-              // Repainting the subtree is what schedules the next copy, so the
-              // region tracks typing, carets, animations and resizes.
-              child: _RepaintNotifier(onPaint: _handleSubtreePainted, child: widget.child),
-            ),
-          ),
-          // What a capture sees in place of the subtree above, and never a
-          // pointer target. It stays in the tree and only changes colour: adding
-          // or removing it would shift the Stack's children, rebuild the
-          // UiKitView below and reset its copy, which loops.
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ColoredBox(color: _snapshotReady ? _placeholderColor : const Color(0x00000000)),
-            ),
-          ),
-          // What the user sees: the rasterised subtree, excluded from captures.
-          Positioned.fill(
-            child: UiKitView(
-              viewType: _viewType,
-              creationParams: <String, dynamic>{'enabled': widget.enabled},
-              creationParamsCodec: const StandardMessageCodec(),
-              hitTestBehavior: .transparent,
-              onPlatformViewCreated: _handlePlatformViewCreated,
-            ),
-          ),
-        ],
-      ),
-    );
+/// Lays out a guarded subtree with an optional capture overlay on top of it.
+///
+/// This is the region's layout; it is package-internal (not exported by the
+/// library) but public so the package's own tests can assert on it:
+///
+/// * the subtree is laid out with the constraints this widget received,
+///   **unchanged**, so wrapping it cannot change its layout;
+/// * the region's size is the subtree's size;
+/// * the overlay ([RenderScreenshotShieldRegion.captureColor] and the second
+///   child) is laid out tight to that size, so it always matches the region;
+/// * nothing is clipped, so a child that paints outside its box is not cut;
+/// * only the subtree is a pointer target and only the subtree contributes
+///   semantics.
+class ScreenshotShieldRegionLayout extends MultiChildRenderObjectWidget {
+  /// Creates the layout for a guarded region.
+  const ScreenshotShieldRegionLayout({
+    super.key,
+    required this.captureColor,
+    required this.onSubtreeSizeChanged,
+    super.children,
+  });
+
+  /// The colour painted over the subtree while it is excluded from captures, or
+  /// `null` while nothing may be painted (before the first copy exists).
+  final Color? captureColor;
+
+  /// Called when the subtree is laid out at a new size.
+  final VoidCallback onSubtreeSizeChanged;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      RenderScreenshotShieldRegion(captureColor, onSubtreeSizeChanged);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderScreenshotShieldRegion renderObject) {
+    renderObject
+      ..captureColor = captureColor
+      ..onSubtreeSizeChanged = onSubtreeSizeChanged;
+  }
+}
+
+/// The render object behind [ScreenshotShieldRegionLayout].
+class RenderScreenshotShieldRegion extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, StackParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, StackParentData> {
+  /// Creates the render object.
+  RenderScreenshotShieldRegion(this._captureColor, this._onSubtreeSizeChanged);
+
+  /// The first child, which is the guarded subtree.
+  RenderBox? get _subtree => firstChild;
+
+  /// The last child, which is the capture overlay (a platform view), if any.
+  RenderBox? get _overlay {
+    final RenderBox? overlay = lastChild;
+    return identical(overlay, firstChild) ? null : overlay;
+  }
+
+  Color? _captureColor;
+
+  /// The colour painted over the subtree, or `null` to paint nothing.
+  Color? get captureColor => _captureColor;
+  set captureColor(Color? value) {
+    if (_captureColor == value) {
+      return;
+    }
+    _captureColor = value;
+    markNeedsPaint();
+  }
+
+  VoidCallback? _onSubtreeSizeChanged;
+
+  /// Called from [performLayout] when the subtree's size changes.
+  set onSubtreeSizeChanged(VoidCallback? value) => _onSubtreeSizeChanged = value;
+
+  Size? _lastSubtreeSize;
+
+  @override
+  void setupParentData(RenderObject child) {
+    if (child.parentData is! StackParentData) {
+      child.parentData = StackParentData();
+    }
+  }
+
+  @override
+  void performLayout() {
+    final RenderBox? subtree = _subtree;
+    if (subtree == null) {
+      size = constraints.smallest;
+      return;
+    }
+    // The constraints this render object received are passed on unchanged: the
+    // guarded widget has to lay out exactly as it would without the region.
+    subtree.layout(constraints, parentUsesSize: true);
+    size = subtree.size;
+    if (_lastSubtreeSize != size) {
+      _lastSubtreeSize = size;
+      // Inside layout, so this must not build or paint: it schedules the copy.
+      _onSubtreeSizeChanged?.call();
+    }
+    _overlay?.layout(BoxConstraints.tight(size));
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final RenderBox? subtree = _subtree;
+    if (subtree == null) {
+      return;
+    }
+    context.paintChild(subtree, offset);
+    final Color? captureColor = _captureColor;
+    if (captureColor != null) {
+      // Painted between the subtree and the overlay: this is what a capture sees
+      // (the excluded canvas contributes nothing to it), and the user never sees
+      // it because the overlay covers the whole region.
+      context.canvas.drawRect(offset & size, Paint()..color = captureColor);
+    }
+    final RenderBox? overlay = _overlay;
+    if (overlay != null) {
+      context.paintChild(overlay, offset);
+    }
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    // Only the subtree is a pointer target: taps, drags, focus and text input
+    // must reach the widget, and the overlay must never absorb them.
+    final RenderBox? subtree = _subtree;
+    return subtree != null && subtree.hitTest(result, position: position);
+  }
+
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {
+    // The overlay contributes no semantics; the subtree behaves as it would
+    // unwrapped.
+    final RenderBox? subtree = _subtree;
+    if (subtree != null) {
+      visitor(subtree);
+    }
   }
 }
 

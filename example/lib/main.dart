@@ -201,7 +201,7 @@ class _SecondScreenState extends State<SecondScreen> {
   final TextEditingController _text = TextEditingController();
   Timer? _ticker;
   int _seconds = 0;
-  bool _protectRegion = true;
+  bool _alwaysProtect = false;
 
   @override
   void initState() {
@@ -230,19 +230,20 @@ class _SecondScreenState extends State<SecondScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'On iOS the region below is kept out of screenshots, screen recordings '
-            'and the app-switcher snapshot, while the rest of the screen stays '
-            'capturable. The user keeps seeing it: the region shows a copy of the '
-            'subtree that is refreshed whenever the subtree repaints.',
+            'By default this region is the original widget - nothing wrapped, '
+            'nothing rasterised - and iOS only keeps it out of captures while the '
+            'screen is recorded or mirrored, or while the app is in the background '
+            '(which also keeps it out of the app-switcher snapshot).',
           ),
           const SizedBox(height: 8),
           SwitchListTile(
-            title: const Text('Protect region'),
+            title: const Text('Always keep the region out of captures'),
             subtitle: const Text(
-              'Off renders the subtree directly, with no native view',
+              'On: also blanks foreground screenshots, by showing a live copy of '
+              'the subtree instead of the subtree itself',
             ),
-            value: _protectRegion,
-            onChanged: (value) => setState(() => _protectRegion = value),
+            value: _alwaysProtect,
+            onChanged: (value) => setState(() => _alwaysProtect = value),
           ),
           const Text('Ordinary content (captured normally):'),
           const SizedBox(height: 8),
@@ -256,10 +257,14 @@ class _SecondScreenState extends State<SecondScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          const Text('Sensitive region (never captured):'),
+          const Text('Sensitive region:'),
           const SizedBox(height: 8),
           ScreenshotShieldSensitiveView(
-            enabled: _protectRegion,
+            protection: _alwaysProtect
+                ? SensitiveProtection.always
+                : SensitiveProtection.whileCaptured,
+            // What a capture shows, and what the user sees behind the copy.
+            captureColor: Colors.black,
             child: Container(
               padding: const EdgeInsets.all(12),
               color: Colors.deepOrange,
@@ -294,11 +299,13 @@ class _SecondScreenState extends State<SecondScreen> {
           ),
           const SizedBox(height: 24),
           const Text(
-            'Try it: the counter ticks and typing works while the region stays out '
-            'of captures. Take a screenshot with the hardware buttons (or start a '
-            'screen recording) and this region comes out blank while the teal block '
-            'above is captured. On other platforms the widget renders the subtree '
-            'directly.',
+            'Try it: the counter ticks and typing works. Start a screen recording '
+            'from Control Center and this region comes out black in the recording '
+            'while the app on screen keeps showing it; background the app and the '
+            'app-switcher card is black too. A foreground screenshot is not covered '
+            'unless the switch above is on - screens that must come out blank use '
+            'whole-window prevention, which is what the home screen of this demo '
+            'does.',
           ),
         ],
       ),

@@ -91,11 +91,14 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
         container.onLayout = { [weak self] in
             guard let self else { return }
             guard self.container.window != nil else {
-                // The view left the hierarchy (the screen is being popped, for
-                // example). Tear the protection down now, while everything is
-                // still alive, instead of re-nesting layers during UIKit's own
-                // teardown or relying on `deinit` to do it.
-                self.removeProtection()
+                // The view left the hierarchy: the screen is being popped, or
+                // Flutter's platform-views controller is resetting (which it does
+                // while the app is backgrounded). UIKit is mid-teardown there, so
+                // do not move layers at all - a layer whose delegate UIKit has
+                // already released is retained by the next layer operation and
+                // crashes in `objc_retain`. The views and layers are released
+                // together with the platform view, which needs no cleanup.
+                SecureCanvas.log("sensitive view \(self.viewId): left the window (detached)")
                 return
             }
             if self.secureField == nil {
@@ -116,18 +119,25 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
                 let data = arguments?["bytes"] as? FlutterStandardTypedData
                 let width = arguments?["width"] as? Int
                 let height = arguments?["height"] as? Int
+                let backdropValue = (arguments?["backdropColor"] as? NSNumber)?.uint32Value
+                    ?? (arguments?["backdropColor"] as? Int).map { UInt32(truncatingIfNeeded: $0) }
+                var image: UIImage?
                 if let data, let width, let height {
                     // Raw RGBA pixels: the region is refreshed whenever the
                     // guarded subtree repaints, so encoding every frame would be
                     // the dominant cost.
-                    self.imageView.image = Self.makeImage(
-                        fromRawRgba: data.data,
-                        width: width,
-                        height: height
-                    )
+                    image = Self.makeImage(fromRawRgba: data.data, width: width, height: height)
                 } else if let data {
                     // Tolerate an encoded image from an older client.
-                    self.imageView.image = UIImage(data: data.data)
+                    image = UIImage(data: data.data)
+                }
+                if let image {
+                    // The backdrop is painted *inside* the capture-excluded canvas,
+                    // behind the copy: the user sees it through the transparent
+                    // parts of the subtree, while a capture still sees only what
+                    // Flutter painted behind the canvas.
+                    self.imageView.backgroundColor = backdropValue.map(Self.color(fromArgb:)) ?? .clear
+                    self.imageView.image = image
                 }
                 result(nil)
             case "setEnabled":
@@ -175,6 +185,16 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
               )
         else { return nil }
         return UIImage(cgImage: image)
+    }
+
+    /// Builds a colour from a Flutter ARGB int, the format of `Color.toARGB32()`.
+    private static func color(fromArgb argb: UInt32) -> UIColor {
+        UIColor(
+            red: CGFloat((argb >> 16) & 0xFF) / 255,
+            green: CGFloat((argb >> 8) & 0xFF) / 255,
+            blue: CGFloat(argb & 0xFF) / 255,
+            alpha: CGFloat((argb >> 24) & 0xFF) / 255
+        )
     }
 
     deinit {
@@ -225,10 +245,10 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
         )
     }
 
-    /// Undoes the capture exclusion. Only called while the region is still
-    /// alive (leaving the window, or being disabled) - never from `deinit`,
-    /// because Flutter disposes platform views from inside its frame submit and
-    /// mutating the layer tree there is unsafe.
+    /// Undoes the capture exclusion. Only called while the region is still alive
+    /// and in the window (being disabled) - never from `deinit` and never while
+    /// UIKit is tearing the view down, because mutating the layer tree there is
+    /// unsafe.
     private func removeProtection() {
         if isNested {
             imageView.layer.removeFromSuperlayer()
@@ -238,10 +258,16 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
         }
         secureField?.removeFromSuperview()
         secureField = nil
-        canvasView = nil
+        // The canvas view is released on the next runloop turn: CoreAnimation's
+        // current transaction can still reference its layer, and a layer that
+        // outlives its delegate - `CALayer.delegate` is `unowned(unsafe)` - is
+        // what crashes in `objc_retain` when it is touched again.
+        if let retired = canvasView {
+            canvasView = nil
+            DispatchQueue.main.async { _ = retired }
+        }
         originalSuperlayer = nil
-        let state = container.window == nil ? "detached" : "attached"
-        SecureCanvas.log("sensitive view \(viewId): protection removed (\(state))")
+        SecureCanvas.log("sensitive view \(viewId): protection removed")
     }
 
     /// Re-nests the snapshot layer, which UIKit moves back when it lays the view

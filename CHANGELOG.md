@@ -1,37 +1,43 @@
 ## 0.1.7
 
-* `ScreenshotShieldSensitiveView` now keeps its subtree out of screenshots, screen
-  recordings and the app-switcher snapshot as a *live copy* instead of a one-shot
-  snapshot: the region is re-rasterised whenever the subtree repaints (at most once
-  per frame, throttled by `refreshInterval`), so typing, a blinking caret,
-  animations and layout or size changes all show up, and a resized region is never
-  stretched from a stale copy. It sends raw RGBA pixels instead of PNG, because
-  encoding every frame would dominate the cost, and a refresh scheduled outside a
-  frame (the throttle timer, a resize, the controller) now asks for one, so the
-  last state always reaches the native view. The subtree stays laid out and
-  interactive, the placeholder stays transparent until the first copy lands, and
-  the region still stands down while whole-window prevention is active.
-* `ScreenshotShieldSensitiveView`'s placeholder now defaults to the ambient
-  scaffold background instead of opaque black, so it no longer shows black behind
-  transparent parts of the child (rounded cells with transparent gaps, for
-  example); `placeholderColor` still overrides it.
-* Add `SecureCanvas`, the shared secure-text-field helper used by the whole-window
-  protection and the sensitive view.
+* `ScreenshotShieldSensitiveView` no longer shows a copy in normal use. It now
+  wraps the subtree in a layout-neutral box that paints nothing, creates no
+  platform view and rasterises nothing, and only engages while protection is
+  needed: `protection: SensitiveProtection.whileCaptured` (the default) covers
+  screen recordings and mirroring plus the app-switcher snapshot, and
+  `protection: SensitiveProtection.always` keeps it engaged permanently for anyone
+  who also needs foreground screenshots blanked.
+* While engaged, a capture shows `captureColor` (black by default) and the user
+  sees the subtree as a copy that is refreshed whenever it repaints, composited
+  over `backdropColor` (the ambient scaffold background by default) inside the
+  capture-excluded canvas. That separates what a capture sees from what fills the
+  transparent parts of the child on screen, which used to be the same colour.
+  `placeholderColor` is renamed to `captureColor`; the release is unpublished, so
+  there is nothing to migrate.
+* The region is laid out by a custom render box instead of a `Stack`: the subtree
+  receives the constraints the region received, unchanged, the region sizes itself
+  from the subtree, the overlay is sized to match it exactly, nothing is clipped,
+  and only the subtree is a pointer target or contributes semantics. Wrapping a
+  widget can no longer change how that widget lays out.
+* Sends raw RGBA pixels and the backdrop colour to the platform view instead of
+  PNG, because the copy is refreshed as the subtree repaints and encoding every
+  frame would dominate the cost.
 * Reference count `startListening`/`stopListening` in the platform implementation,
   so several consumers (two guarded routes, for example) no longer cancel each
   other's detection.
-* iOS: fix a crash when a sensitive view was disposed, for example when popping
-  the screen it lives on. Flutter disposes platform views from inside a frame
-  submit, so the rasterised layer is no longer moved back out of the secure canvas
-  from `deinit`; the view tree is simply released.
-* iOS: keep the region interactive. Its placeholder sat above the wrapped subtree
-  and, being opaque, absorbed pointers, so taps, drags, focus and text input never
-  reached the widget inside the region. It is now transparent to pointers.
-* iOS: stop covering the region with the placeholder before the native view holds
-  a copy, retry the first copy until it lands, re-take it when the region is laid
-  out at a new size, and coalesce refresh requests.
-* iOS: fix the region's platform view being rebuilt on every snapshot, which reset
-  the snapshot state and looped.
+* iOS: fix a crash when the region was disposed, for example when popping the
+  screen it lives on. Flutter disposes platform views from inside a frame submit,
+  so the rasterised layer is no longer moved back out of the secure canvas from
+  `deinit`; the view tree is simply released.
+* iOS: fix a crash when UIKit rebuilt the private canvas while the region was
+  alive, which happened during its own scene snapshot pass (`EXC_BAD_ACCESS` in
+  `objc_retain`). The canvas is now held as its *view* - its layer's `delegate` is
+  that view and is `unowned(unsafe)`, so a layer kept on its own could outlive it -
+  and it is re-resolved from the live field on every layout pass instead of trusting
+  a cached private layer. The whole-window protection had the same latent bug and
+  follows the same pattern.
+* iOS: keep the region interactive and stop covering it with an opaque rectangle
+  before the copy exists.
 
 ## 0.1.6
 

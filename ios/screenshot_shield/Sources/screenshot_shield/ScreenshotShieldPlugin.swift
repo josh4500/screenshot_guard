@@ -194,7 +194,14 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         secureTextField = nil
         protectedContentView = nil
         protectedContentSuperlayer = nil
-        protectedContainerView = nil
+        // Released on the next runloop turn: CoreAnimation's current transaction
+        // can still reference the canvas layer, and a layer that outlives its
+        // delegate - `CALayer.delegate` is `unowned(unsafe)` - crashes in
+        // `objc_retain` when it is touched again.
+        if let retired = protectedContainerView {
+            protectedContainerView = nil
+            DispatchQueue.main.async { _ = retired }
+        }
     }
 
     public func setBackgroundBlur(blurEnabled: Bool) throws {
