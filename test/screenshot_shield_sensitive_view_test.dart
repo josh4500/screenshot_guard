@@ -1,6 +1,3 @@
-// ignore_for_file: deprecated_member_use_from_same_package
-// The snapshot region is deprecated in favour of ScreenshotShieldSensitiveRegion;
-// its tests stay until it is removed in 0.2.0.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -112,17 +109,30 @@ void main() {
       await tester.pump();
     }
 
-    Widget region({Color placeholder = const Color(0xFF112233), Widget? child}) {
+    /// How many copies of the subtree have reached the platform view.
+    int snapshotCount() => viewCalls.where((MethodCall call) => call.method == 'setSnapshot').length;
+
+    Widget region({
+      Color placeholder = const Color(0xFF112233),
+      Widget? child,
+      bool enabled = true,
+      Duration? refreshInterval,
+    }) {
       return Directionality(
         textDirection: TextDirection.ltr,
         child: Center(
-          child: ScreenshotShieldSensitiveView(placeholderColor: placeholder, child: child ?? const Text('secret')),
+          child: ScreenshotShieldSensitiveView(
+            placeholderColor: placeholder,
+            enabled: enabled,
+            refreshInterval: refreshInterval,
+            child: child ?? const SizedBox(width: 200, height: 80, child: Text('secret')),
+          ),
         ),
       );
     }
 
-    testWidgets('does not paint the placeholder before a snapshot exists', (WidgetTester tester) async {
-      // The capture cannot succeed, so the region must keep showing the live
+    testWidgets('does not paint the placeholder before a copy exists', (WidgetTester tester) async {
+      // Rasterising cannot succeed, so the region must keep showing the live
       // child instead of an opaque rectangle.
       respondToSnapshots = false;
 
@@ -137,7 +147,26 @@ void main() {
       expect(placeholder.color, const Color(0x00000000));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('covers the child with the placeholder once a snapshot exists', (WidgetTester tester) async {
+    testWidgets('sends raw RGBA pixels and their size to its platform view', (WidgetTester tester) async {
+      await tester.pumpWidget(region());
+      await settleSnapshot(tester);
+
+      expect(viewId, isNotNull);
+      expect(snapshotCount(), greaterThanOrEqualTo(1));
+      final MethodCall snapshot = viewCalls.firstWhere((MethodCall call) => call.method == 'setSnapshot');
+      final Map<Object?, Object?> arguments = snapshot.arguments as Map<Object?, Object?>;
+      final Uint8List bytes = arguments['bytes']! as Uint8List;
+      final int width = arguments['width']! as int;
+      final int height = arguments['height']! as int;
+
+      expect(width, greaterThan(0));
+      expect(height, greaterThan(0));
+      // Four bytes per pixel: the native side builds the image from them
+      // directly, so no encoding happens per frame.
+      expect(bytes.length, width * height * 4);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('covers the child with the placeholder once a copy exists', (WidgetTester tester) async {
       await tester.pumpWidget(region());
       await settleSnapshot(tester);
 
@@ -149,13 +178,141 @@ void main() {
       expect(placeholder.color, const Color(0xFF112233));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('creates the platform view once, not on every snapshot', (WidgetTester tester) async {
+    testWidgets('refreshes the copy when the subtree repaints', (WidgetTester tester) async {
+      var value = 0;
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                rebuild = setState;
+                return ScreenshotShieldSensitiveView(
+                  placeholderColor: const Color(0xFF112233),
+                  child: SizedBox(width: 200, height: 80, child: Text('value $value')),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await settleSnapshot(tester);
+      final int afterFirstCopy = snapshotCount();
+
+      rebuild(() => value++);
+      await tester.pump();
+      await settleSnapshot(tester);
+
+      expect(find.text('value 1'), findsOneWidget);
+      expect(snapshotCount(), greaterThan(afterFirstCopy));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('does not refresh while nothing repaints', (WidgetTester tester) async {
       await tester.pumpWidget(region());
+      await settleSnapshot(tester);
+      final int afterFirstCopy = snapshotCount();
+
+      await tester.pump();
+      await tester.pump();
+      await settleSnapshot(tester);
+
+      expect(snapshotCount(), afterFirstCopy);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('refreshes the copy after the region is resized', (WidgetTester tester) async {
+      var width = 200.0;
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                rebuild = setState;
+                return ScreenshotShieldSensitiveView(
+                  placeholderColor: const Color(0xFF112233),
+                  child: SizedBox(width: width, height: 80, child: const Text('secret')),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await settleSnapshot(tester);
+      final int afterFirstCopy = snapshotCount();
+
+      rebuild(() => width = 320);
+      await tester.pump();
+      await settleSnapshot(tester);
+
+      expect(tester.getSize(find.byType(UiKitView)).width, 320);
+      expect(snapshotCount(), greaterThan(afterFirstCopy));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('throttles refreshes to refreshInterval', (WidgetTester tester) async {
+      var value = 0;
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                rebuild = setState;
+                return ScreenshotShieldSensitiveView(
+                  placeholderColor: const Color(0xFF112233),
+                  refreshInterval: const Duration(seconds: 2),
+                  child: SizedBox(width: 200, height: 80, child: Text('value $value')),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await settleSnapshot(tester);
+      final int afterFirstCopy = snapshotCount();
+
+      rebuild(() => value++);
+      await tester.pump();
+      await settleSnapshot(tester);
+      // Inside the throttle window the copy is not re-rasterised.
+      expect(snapshotCount(), afterFirstCopy);
+
+      // The deferred refresh lands once the window has passed.
+      await tester.pump(const Duration(seconds: 2));
+      await settleSnapshot(tester);
+      expect(snapshotCount(), greaterThan(afterFirstCopy));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('creates the platform view once, not on every refresh', (WidgetTester tester) async {
+      var value = 0;
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                rebuild = setState;
+                return ScreenshotShieldSensitiveView(
+                  placeholderColor: const Color(0xFF112233),
+                  child: SizedBox(width: 200, height: 80, child: Text('value $value')),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await settleSnapshot(tester);
+
+      rebuild(() => value++);
+      await tester.pump();
       await settleSnapshot(tester);
 
       expect(find.byType(ColoredBox), findsOneWidget);
-      // A placeholder that appeared/disappeared with the snapshot state would
-      // rebuild the platform view and loop forever.
+      // A placeholder that appeared/disappeared with the copy state would rebuild
+      // the platform view and loop forever.
       expect(createCalls, 1);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
@@ -209,17 +366,12 @@ void main() {
       expect(find.byType(ColoredBox), findsOneWidget);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('sends the rasterised subtree to its platform view', (WidgetTester tester) async {
-      await tester.pumpWidget(region());
-      await settleSnapshot(tester);
+    testWidgets('renders the child directly when it is disabled', (WidgetTester tester) async {
+      await tester.pumpWidget(region(enabled: false));
 
-      expect(viewId, isNotNull);
-      expect(viewCalls.map((MethodCall call) => call.method), contains('setSnapshot'));
-      final MethodCall snapshot = viewCalls.firstWhere((MethodCall call) => call.method == 'setSnapshot');
-      final Uint8List bytes = (snapshot.arguments as Map<Object?, Object?>)['bytes']! as Uint8List;
-      expect(bytes, isNotEmpty);
-      // PNG signature.
-      expect(bytes.sublist(0, 4), <int>[0x89, 0x50, 0x4E, 0x47]);
+      expect(find.text('secret'), findsOneWidget);
+      expect(find.byType(UiKitView), findsNothing);
+      expect(find.byType(ColoredBox), findsNothing);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
   });
 }

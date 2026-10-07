@@ -106,8 +106,23 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
             }
             switch call.method {
             case "setSnapshot":
-                let data = (call.arguments as? [String: Any])?["bytes"] as? FlutterStandardTypedData
-                self.imageView.image = data.flatMap { UIImage(data: $0.data) }
+                let arguments = call.arguments as? [String: Any]
+                let data = arguments?["bytes"] as? FlutterStandardTypedData
+                let width = arguments?["width"] as? Int
+                let height = arguments?["height"] as? Int
+                if let data, let width, let height {
+                    // Raw RGBA pixels: the region is refreshed whenever the
+                    // guarded subtree repaints, so encoding every frame would be
+                    // the dominant cost.
+                    self.imageView.image = Self.makeImage(
+                        fromRawRgba: data.data,
+                        width: width,
+                        height: height
+                    )
+                } else if let data {
+                    // Tolerate an encoded image from an older client.
+                    self.imageView.image = UIImage(data: data.data)
+                }
                 result(nil)
             case "setEnabled":
                 self.enabled = (call.arguments as? Bool) ?? true
@@ -129,6 +144,31 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
 
     func view() -> UIView {
         container
+    }
+
+    /// Builds the image displayed for the region from raw RGBA pixels.
+    ///
+    /// `ui.ImageByteFormat.rawRgba` is premultiplied RGBA, eight bits per
+    /// channel, which is `byteOrder32Big | premultipliedLast` for CoreGraphics.
+    private static func makeImage(fromRawRgba bytes: Data, width: Int, height: Int) -> UIImage? {
+        guard width > 0, height > 0, bytes.count >= width * height * 4 else { return nil }
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let provider = CGDataProvider(data: bytes as CFData),
+              let image = CGImage(
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bitsPerPixel: 32,
+                  bytesPerRow: width * 4,
+                  space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
+                  provider: provider,
+                  decode: nil,
+                  shouldInterpolate: false,
+                  intent: .defaultIntent
+              )
+        else { return nil }
+        return UIImage(cgImage: image)
     }
 
     deinit {

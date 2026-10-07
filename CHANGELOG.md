@@ -1,43 +1,37 @@
 ## 0.1.7
 
-* Add `ScreenshotShieldSensitiveRegion`, the cross-platform way to keep one part
-  of a screen out of captures. Its subtree stays live - correct layout through
-  size changes, animations, text input, anything Flutter draws on top of it - and
-  is shielded only while the screen is being recorded or mirrored (iOS, Android
-  15+) and while the app is not in the foreground, which keeps the region out of
-  the app-switcher snapshot. While shielded the child keeps its layout, stops
-  receiving pointers and leaves the semantics tree; set `blur` to blur the live
-  child instead of covering it, or `shielded` to drive the shield yourself. It
-  manages its own recording listener, and `startListening`/`stopListening` are
-  now reference counted, so several consumers (guards, regions) no longer cancel
-  each other's detection.
-* Deprecate `ScreenshotShieldSensitiveView`, the iOS-only snapshot region. It
-  works in this release and is removed in 0.2.0: it is frozen to a bitmap while
-  shown, Flutter overlays over it (a selection toolbar, a dialog) render behind
-  it, and it therefore cannot serve as a general region mechanism. Use
-  `ScreenshotShieldSensitiveRegion` for live widgets and
-  `setProtection(preventCapture: true)` / a `ScreenshotShieldRouteGuard` on
-  screens where a screenshot must come out blank.
+* `ScreenshotShieldSensitiveView` now keeps its subtree out of screenshots, screen
+  recordings and the app-switcher snapshot as a *live copy* instead of a one-shot
+  snapshot: the region is re-rasterised whenever the subtree repaints (at most once
+  per frame, throttled by `refreshInterval`), so typing, a blinking caret,
+  animations and layout or size changes all show up, and a resized region is never
+  stretched from a stale copy. It sends raw RGBA pixels instead of PNG, because
+  encoding every frame would dominate the cost, and a refresh scheduled outside a
+  frame (the throttle timer, a resize, the controller) now asks for one, so the
+  last state always reaches the native view. The subtree stays laid out and
+  interactive, the placeholder stays transparent until the first copy lands, and
+  the region still stands down while whole-window prevention is active.
 * `ScreenshotShieldSensitiveView`'s placeholder now defaults to the ambient
   scaffold background instead of opaque black, so it no longer shows black behind
   transparent parts of the child (rounded cells with transparent gaps, for
   example); `placeholderColor` still overrides it.
-* Add `SecureCanvas`, the shared secure-text-field helper used by the
-  whole-window protection and the snapshot region.
-* iOS: fix a crash when a sensitive region was disposed, for example when popping
+* Add `SecureCanvas`, the shared secure-text-field helper used by the whole-window
+  protection and the sensitive view.
+* Reference count `startListening`/`stopListening` in the platform implementation,
+  so several consumers (two guarded routes, for example) no longer cancel each
+  other's detection.
+* iOS: fix a crash when a sensitive view was disposed, for example when popping
   the screen it lives on. Flutter disposes platform views from inside a frame
   submit, so the rasterised layer is no longer moved back out of the secure canvas
   from `deinit`; the view tree is simply released.
-* iOS: keep the snapshot region interactive. Its placeholder sat above the
-  wrapped subtree and, being opaque, absorbed pointers, so taps, drags, focus and
-  text input never reached the widget inside the region. It is now transparent to
-  pointers.
-* iOS: stop covering the snapshot region with the placeholder before the native
-  view holds a snapshot, retry the first snapshot until it lands, re-take it when
-  the region is laid out at a new size, and coalesce refresh requests (which now
-  capture after the next frame).
-* iOS: fix the snapshot region's platform view being rebuilt on every snapshot,
-  which reset the snapshot state and looped.
+* iOS: keep the region interactive. Its placeholder sat above the wrapped subtree
+  and, being opaque, absorbed pointers, so taps, drags, focus and text input never
+  reached the widget inside the region. It is now transparent to pointers.
+* iOS: stop covering the region with the placeholder before the native view holds
+  a copy, retry the first copy until it lands, re-take it when the region is laid
+  out at a new size, and coalesce refresh requests.
+* iOS: fix the region's platform view being rebuilt on every snapshot, which reset
+  the snapshot state and looped.
 
 ## 0.1.6
 

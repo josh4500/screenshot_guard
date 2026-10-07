@@ -199,10 +199,25 @@ class SecondScreen extends StatefulWidget {
 
 class _SecondScreenState extends State<SecondScreen> {
   final TextEditingController _text = TextEditingController();
-  bool _previewShield = false;
+  Timer? _ticker;
+  int _seconds = 0;
+  bool _protectRegion = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Something inside the region that keeps changing, to show that the copy the
+    // user sees tracks the live subtree instead of freezing.
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() => _seconds++);
+      }
+    });
+  }
 
   @override
   void dispose() {
+    _ticker?.cancel();
     _text.dispose();
     super.dispose();
   }
@@ -215,19 +230,21 @@ class _SecondScreenState extends State<SecondScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'This route is not guarded, so whole-window protection is off. The '
-            'region below stays live - it renders and accepts input normally - and '
-            'hides itself while the screen is recorded or the app leaves the '
-            'foreground.',
+            'On iOS the region below is kept out of screenshots, screen recordings '
+            'and the app-switcher snapshot, while the rest of the screen stays '
+            'capturable. The user keeps seeing it: the region shows a copy of the '
+            'subtree that is refreshed whenever the subtree repaints.',
           ),
           const SizedBox(height: 8),
           SwitchListTile(
-            title: const Text('Preview shield'),
-            subtitle: const Text('Hide the region, as it does while recording'),
-            value: _previewShield,
-            onChanged: (value) => setState(() => _previewShield = value),
+            title: const Text('Protect region'),
+            subtitle: const Text(
+              'Off renders the subtree directly, with no native view',
+            ),
+            value: _protectRegion,
+            onChanged: (value) => setState(() => _protectRegion = value),
           ),
-          const Text('Ordinary content (never shielded):'),
+          const Text('Ordinary content (captured normally):'),
           const SizedBox(height: 8),
           Container(
             height: 64,
@@ -239,12 +256,10 @@ class _SecondScreenState extends State<SecondScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          const Text(
-            'Sensitive region (shielded while recording or backgrounded):',
-          ),
+          const Text('Sensitive region (never captured):'),
           const SizedBox(height: 8),
-          ScreenshotShieldSensitiveRegion(
-            shielded: _previewShield ? true : null,
+          ScreenshotShieldSensitiveView(
+            enabled: _protectRegion,
             child: Container(
               padding: const EdgeInsets.all(12),
               color: Colors.deepOrange,
@@ -252,9 +267,9 @@ class _SecondScreenState extends State<SecondScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Sensitive region · Expires 09/29',
-                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  Text(
+                    'Live counter: $_seconds s · Expires 09/29',
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
                   ),
                   const SizedBox(height: 8),
                   TextField(
@@ -263,7 +278,7 @@ class _SecondScreenState extends State<SecondScreen> {
                     cursorColor: Colors.white,
                     decoration: const InputDecoration(
                       isDense: true,
-                      hintText: 'Tap and type: the region stays live',
+                      hintText: 'Tap and type: input works normally',
                       hintStyle: TextStyle(color: Colors.white70),
                       enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(color: Colors.white54),
@@ -279,13 +294,11 @@ class _SecondScreenState extends State<SecondScreen> {
           ),
           const SizedBox(height: 24),
           const Text(
-            'Start a screen recording from Control Center and this region hides '
-            'itself (use "Preview shield" to see it without recording). Background '
-            'the app and it is hidden in the app switcher too. A foreground '
-            'screenshot is not covered, because iOS cannot exclude live Flutter '
-            'pixels from a capture - screens that must come out blank use '
-            'whole-window prevention instead, which is what the home screen of '
-            'this demo does.',
+            'Try it: the counter ticks and typing works while the region stays out '
+            'of captures. Take a screenshot with the hardware buttons (or start a '
+            'screen recording) and this region comes out blank while the teal block '
+            'above is captured. On other platforms the widget renders the subtree '
+            'directly.',
           ),
         ],
       ),
