@@ -137,10 +137,18 @@ It is a prototype, and these are its costs:
 - The region is displayed from a snapshot, so animations, video and text carets
   are only as fresh as the last refresh. Set `refreshInterval` to refresh
   periodically (each refresh reads the subtree back from the GPU), or call
-  `ScreenshotShieldSensitiveViewController.refresh()` when the content changes.
-- The subtree is still laid out underneath so touches keep working, but it is
-  covered by an opaque placeholder: keep [placeholderColor] opaque, otherwise
-  the rasterised subtree can reach a capture.
+  `ScreenshotShieldSensitiveViewController.refresh()` when the content changes -
+  it captures after the next frame, so calling it from a text field's `onChanged`
+  rasterises what was just typed.
+- The wrapped subtree stays live and interactive: the platform view and the
+  placeholder are transparent to pointers, so taps, drags, focus and text input
+  reach it normally even though the user is looking at a snapshot.
+- `placeholderColor` is what a capture sees in the region. It is only painted
+  once the native view holds a snapshot, so an opaque rectangle never covers the
+  region on screen: until the first snapshot lands (and permanently, if
+  rasterising keeps failing) the child itself is shown and the region is not yet
+  excluded from captures. Keep the color opaque, otherwise the rasterised
+  subtree can reach a capture once the placeholder is in use.
 - iOS only. On other platforms the widget is a no-op and builds its child
   directly. Android's granular equivalents are `View.setContentSensitivity`
   (API 35+) or `SurfaceView.setSecure`, both of which need a native view.

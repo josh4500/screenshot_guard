@@ -22,12 +22,20 @@ import 'package:screenshot_shield/screenshot_shield.dart';
 ///   only be excluded if it owns a native view. The subtree is therefore
 ///   rasterised with [RenderRepaintBoundary.toImage] and the resulting PNG is
 ///   displayed by the platform view - this is a snapshot, not a live widget.
-/// * The subtree is still laid out and painted underneath, but it is covered by
-///   an opaque placeholder, which is what a capture sees. Touches pass through
-///   the platform view to that subtree, so interaction keeps working, but visual
-///   feedback (ripples, text carets, animations) is only as fresh as the last
-///   snapshot. Set [refreshInterval] to refresh periodically, or call
-///   [ScreenshotShieldSensitiveViewController.refresh] when the content changes.
+/// * The subtree is still laid out and painted underneath, and it stays live and
+///   interactive: the platform view and the placeholder are transparent to
+///   pointers, so taps, drags, focus and text input reach [child] as usual. What
+///   the user sees is the snapshot, so visual feedback (ripples, text carets,
+///   animations) is only as fresh as the last snapshot; set [refreshInterval] to
+///   refresh periodically, or call
+///   [ScreenshotShieldSensitiveViewController.refresh] when the content changes
+///   (for example from a text field's `onChanged`, which captures after the next
+///   frame).
+/// * [placeholderColor] is what a capture sees where the region is. It is only
+///   painted once the native view actually holds a snapshot, so an opaque
+///   rectangle never covers the region on screen: until the first snapshot
+///   arrives - and permanently, if rasterising keeps failing - [child] is shown
+///   and the region is simply not excluded from captures yet.
 /// * The widget derives from the same undocumented UIKit behaviour as the
 ///   whole-window protection, so it can break on any iOS release, and the
 ///   exclusion itself can only be confirmed on a real device. The region is
@@ -97,10 +105,14 @@ class ScreenshotShieldSensitiveViewController {
 
   /// Re-rasterises the guarded subtree into the native view.
   ///
-  /// Does nothing when the widget is not using a platform view, or when a
-  /// refresh is already in flight.
-  Future<void> refresh() async {
-    await _state?.refresh();
+  /// The capture happens after the next frame, so calling this from a change
+  /// callback (a text field's `onChanged`, for example) rasterises the state
+  /// that includes the change. Requests that arrive while a capture is in
+  /// flight are coalesced into one more capture rather than dropped.
+  ///
+  /// Does nothing when the widget is not using a platform view.
+  void refresh() {
+    _state?.scheduleRefresh();
   }
 
   void _attach(_ScreenshotShieldSensitiveViewState state) {
@@ -117,10 +129,23 @@ class ScreenshotShieldSensitiveViewController {
 class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiveView> {
   static const String _viewType = 'screenshot_shield/sensitive_view';
 
+  /// How often the first snapshot is retried until it succeeds. Until then the
+  /// region shows the live child rather than the capture placeholder.
+  static const Duration _firstSnapshotRetryInterval = Duration(milliseconds: 250);
+
   final GlobalKey _boundaryKey = GlobalKey();
   MethodChannel? _channel;
   Timer? _timer;
   bool _capturing = false;
+  bool _refreshQueued = false;
+
+  /// Whether the native view has received a snapshot yet.
+  ///
+  /// The placeholder is what a *capture* should see, so it is only painted once
+  /// there is a snapshot covering it; before that the live child is shown
+  /// instead of an opaque rectangle, and a region whose snapshot cannot be taken
+  /// stays visible rather than going blank.
+  bool _snapshotReady = false;
 
   /// Whether this region needs its own native protection.
   ///
@@ -144,6 +169,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     if (ScreenshotShield.preventCaptureActive.value) {
       // The native view is being torn down with the rebuild; stop talking to it.
       _channel = null;
+      _snapshotReady = false;
       _timer?.cancel();
     } else {
       _restartTimer();
@@ -181,9 +207,31 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
 
   void _handlePlatformViewCreated(int id) {
     _channel = MethodChannel('$_viewType/$id');
+    // A fresh native view has no snapshot, so drop the placeholder until the
+    // capture below lands (otherwise an opaque rectangle covers the region).
+    if (_snapshotReady && mounted) {
+      setState(() => _snapshotReady = false);
+    } else {
+      _snapshotReady = false;
+    }
     unawaited(_setEnabled(widget.enabled));
-    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(refresh()));
+    scheduleRefresh();
+    // Retry until the first snapshot lands, so the region does not stay
+    // unprotected just because it was first laid out while it could not be
+    // rasterised (off screen, or mid-animation).
     _restartTimer();
+  }
+
+  /// Schedules a capture after the next frame, coalescing bursts of requests.
+  void scheduleRefresh() {
+    if (!mounted || _refreshQueued) {
+      return;
+    }
+    _refreshQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshQueued = false;
+      unawaited(refresh());
+    });
   }
 
   Future<void> _setEnabled(bool enabled) async {
@@ -198,8 +246,13 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
 
   void _restartTimer() {
     _timer?.cancel();
-    final Duration? interval = widget.refreshInterval;
-    if (interval == null || !_usesPlatformView) {
+    if (!_usesPlatformView) {
+      return;
+    }
+    // Without an explicit interval the timer exists only until the first
+    // snapshot arrives; with one it keeps the region fresh.
+    final Duration? interval = widget.refreshInterval ?? (_snapshotReady ? null : _firstSnapshotRetryInterval);
+    if (interval == null) {
       return;
     }
     _timer = Timer.periodic(interval, (_) => unawaited(refresh()));
@@ -208,7 +261,12 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
   /// Rasterises the guarded subtree and hands it to the native view.
   Future<void> refresh() async {
     final MethodChannel? channel = _channel;
-    if (channel == null || _capturing || !mounted) {
+    if (channel == null || !mounted) {
+      return;
+    }
+    if (_capturing) {
+      // Do not lose the request: capture once more when this one finishes.
+      _refreshQueued = true;
       return;
     }
     final RenderObject? renderObject = _boundaryKey.currentContext?.findRenderObject();
@@ -224,16 +282,34 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
           return;
         }
         await channel.invokeMethod<void>('setSnapshot', <String, dynamic>{'bytes': data.buffer.asUint8List()});
+        if (mounted && !_snapshotReady) {
+          setState(() => _snapshotReady = true);
+          // The first snapshot is in; only keep a timer if one was asked for.
+          if (widget.refreshInterval == null) {
+            _timer?.cancel();
+          }
+        }
       } finally {
         image.dispose();
       }
     } catch (error) {
-      // Snapshotting is best effort: the placeholder is still what a capture
-      // sees, the region just renders stale content on screen.
+      // Snapshotting is best effort: the live child stays visible until a
+      // capture succeeds.
       debugPrint('ScreenshotShield: could not snapshot sensitive view: $error');
     } finally {
       _capturing = false;
+      if (_refreshQueued) {
+        _refreshQueued = false;
+        scheduleRefresh();
+      }
     }
+  }
+
+  /// Re-rasterises when the region is laid out at a new size, so a resized
+  /// region is not stretched from a stale snapshot.
+  bool _handleSizeChanged(SizeChangedLayoutNotification notification) {
+    scheduleRefresh();
+    return false;
   }
 
   @override
@@ -254,25 +330,38 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
   }
 
   Widget _buildProtectedRegion() {
-    return Stack(
-      clipBehavior: Clip.hardEdge,
-      children: <Widget>[
-        // Rasterised into the native view. Painted but always covered, so it
-        // never reaches a capture.
-        RepaintBoundary(key: _boundaryKey, child: widget.child),
-        // What a capture sees in place of the subtree above.
-        Positioned.fill(child: ColoredBox(color: widget.placeholderColor)),
-        // What the user sees: the rasterised subtree, excluded from captures.
-        Positioned.fill(
-          child: UiKitView(
-            viewType: _viewType,
-            creationParams: <String, dynamic>{'enabled': widget.enabled},
-            creationParamsCodec: const StandardMessageCodec(),
-            hitTestBehavior: .transparent,
-            onPlatformViewCreated: _handlePlatformViewCreated,
+    return NotificationListener<SizeChangedLayoutNotification>(
+      onNotification: _handleSizeChanged,
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: <Widget>[
+          // Rasterised into the native view, and the live, interactive widget:
+          // the platform view and the placeholder are transparent to pointers,
+          // so taps, drags and focus reach this subtree.
+          SizeChangedLayoutNotifier(
+            child: RepaintBoundary(key: _boundaryKey, child: widget.child),
           ),
-        ),
-      ],
+          // What a capture sees in place of the subtree above, and never a
+          // pointer target. It stays in the tree and only changes colour: adding
+          // or removing it would shift the Stack's children, rebuild the
+          // UiKitView below and reset its snapshot, which loops.
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ColoredBox(color: _snapshotReady ? widget.placeholderColor : const Color(0x00000000)),
+            ),
+          ),
+          // What the user sees: the rasterised subtree, excluded from captures.
+          Positioned.fill(
+            child: UiKitView(
+              viewType: _viewType,
+              creationParams: <String, dynamic>{'enabled': widget.enabled},
+              creationParamsCodec: const StandardMessageCodec(),
+              hitTestBehavior: .transparent,
+              onPlatformViewCreated: _handlePlatformViewCreated,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
