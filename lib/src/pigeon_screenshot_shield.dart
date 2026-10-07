@@ -28,6 +28,8 @@ class PigeonScreenshotShield extends ScreenshotShieldPlatform {
   /// shared by every [ScreenshotShield], keeps them independent.
   int _listeningCount = 0;
 
+  StreamSubscription<bool>? _screenRecordingSubscription;
+
   late final _events = _eventStream();
   late final _screenRecordingEvents = _screenRecordingStream();
 
@@ -46,6 +48,16 @@ class PigeonScreenshotShield extends ScreenshotShieldPlatform {
   Future<void> startListening() async {
     _listeningCount++;
     if (_listeningCount == 1) {
+      // Track the state here rather than in the constructor: subscribing to an
+      // event channel before the Flutter binding exists throws
+      // "Binding has not yet been initialized", and the channel is then never
+      // listened to at all - which silently starves [isScreenRecording] and every
+      // stream listener of events. The subscription is kept for the lifetime of
+      // this instance so the current state stays readable after listening stops.
+      _screenRecordingSubscription ??= _screenRecordingEvents.listen(
+        reportScreenRecordingState,
+        onError: (Object _) {},
+      );
       await _hostApi.startListening();
     }
   }

@@ -304,9 +304,13 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     _syncEngagement();
   }
 
-  /// Resolves the [ScreenshotShield] and subscribes to the recording state before
-  /// asking for listening, so the state the host reports when listening starts is
-  /// not missed.
+  /// Resolves the [ScreenshotShield], reads the current recording state and then
+  /// follows it through the stream.
+  ///
+  /// Reading [ScreenshotShield.isScreenRecording] first is what makes a region that
+  /// appears while the screen is *already* being recorded engage immediately: the
+  /// stream only delivers changes, and a late listener never sees the change it
+  /// missed.
   void _syncShield() {
     final ScreenshotShieldScope? scope = context.dependOnInheritedWidgetOfExactType<ScreenshotShieldScope>();
     final ScreenshotShield shield = scope?.shield ?? (_fallbackShield ??= ScreenshotShield());
@@ -314,6 +318,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     _recordingSubscription = null;
     _shield = shield;
     if (_watchesRecording) {
+      _recording = shield.isScreenRecording;
       _recordingSubscription = shield.onScreenRecordingChanged.listen(_handleRecordingChanged);
     } else {
       _recording = false;

@@ -11,12 +11,18 @@ import 'package:screenshot_shield/src/screenshot_shield_sensitive_view.dart';
 class _FakeShieldPlatform extends ScreenshotShieldPlatform {
   final StreamController<bool> recording = StreamController<bool>.broadcast();
   final List<String> calls = <String>[];
+  StreamSubscription<bool>? _subscription;
 
   @override
   Stream<bool> get onScreenRecordingChanged => recording.stream;
 
   @override
-  Future<void> startListening() async => calls.add('startListening');
+  Future<void> startListening() async {
+    calls.add('startListening');
+    // Mirror PigeonScreenshotShield: the cached state is tracked while listening,
+    // so a widget that mounts later can read the current value.
+    _subscription ??= recording.stream.listen(reportScreenRecordingState, onError: (Object _) {});
+  }
 
   @override
   Future<void> stopListening() async => calls.add('stopListening');
@@ -200,6 +206,27 @@ void main() {
       await emitRecording(tester, false);
       expect(find.byType(UiKitView), findsNothing);
       expect(renderRegion(tester).captureColor, isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('engages when it appears while the screen is already being recorded', (WidgetTester tester) async {
+      // The recording starts before this region exists, and the state event has
+      // already been delivered to whoever was listening: the stream will not
+      // replay it, so the region has to read the current state instead.
+      await tester.pumpWidget(const SizedBox());
+      // A guard on the previous screen was already listening when the recording
+      // started, so the change event has been and gone.
+      await shield.startListening();
+      await emitRecording(tester, true);
+
+      await tester.pumpWidget(region());
+
+      expect(find.byType(UiKitView), findsOneWidget);
+      await settleSnapshot(tester);
+      expect(renderRegion(tester).captureColor, isNotNull);
+
+      // And it still follows the state afterwards.
+      await emitRecording(tester, false);
+      expect(find.byType(UiKitView), findsNothing);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('engages while the app is not in the foreground', (WidgetTester tester) async {

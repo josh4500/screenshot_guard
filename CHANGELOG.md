@@ -1,3 +1,23 @@
+## 0.1.9
+
+* Fix `ScreenshotShieldSensitiveView` staying unprotected when it appeared while
+  the screen was *already* being recorded or mirrored. The recording state was only
+  ever delivered as a stream event, and a broadcast stream replays nothing to a
+  listener that arrives later, while the host's "report the current state" only runs
+  when listening starts - which the reference count suppresses when another
+  consumer (a guard, another region, the app's own subscription) is already
+  listening. A region that mounted mid-recording therefore received nothing until
+  the state changed again.
+* Track the latest screen-recording state centrally and expose it as the plain
+  getter `ScreenshotShield.isScreenRecording`, so anything that starts watching
+  while a recording is in progress can read the current state instead of waiting
+  for a change it missed. Platform implementations feed it through
+  `reportScreenRecordingState`; the Pigeon implementation subscribes when listening
+  starts (not in its constructor, where the Flutter binding is not ready yet and the
+  event channel would silently never be listened to), keeps the subscription so the
+  value stays readable after listening stops, and ignores a stream that is never
+  answered rather than surfacing it as an unhandled error.
+
 ## 0.1.8
 
 * iOS: fix two `EXC_BAD_ACCESS` crashes in `ScreenshotShieldSensitiveView`

@@ -150,7 +150,10 @@ takes over only while protection is needed:
 
 - while the screen is being recorded or mirrored
   (`ScreenshotShield.onScreenRecordingChanged`, i.e. `UIScreen.isCaptured` on iOS -
-  also `true` while mirroring, such as AirPlay - and the Android 15 callback), and
+  also `true` while mirroring, such as AirPlay - and the Android 15 callback). The
+  current state is also available as `ScreenshotShield.isScreenRecording`, which is
+  what lets a region that appears during a recording engage immediately instead of
+  waiting for the next change, and
 - while the app is not in the foreground, which is what keeps the region out of the
   app-switcher snapshot.
 

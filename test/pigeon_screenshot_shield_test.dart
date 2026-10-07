@@ -124,5 +124,36 @@ void main() {
       await subscription.cancel();
       await controller.close();
     });
+
+    test('remembers the screen recording state for listeners that arrive late', () async {
+      final controller = StreamController<bool>.broadcast();
+      final platform = PigeonScreenshotShield(hostApi: _FakeHostApi(), screenRecordingStream: () => controller.stream);
+      addTearDown(controller.close);
+      // Nothing has been reported yet.
+      expect(platform.isScreenRecording, isFalse);
+
+      await platform.startListening();
+
+      controller.add(true);
+      await Future<void>.delayed(Duration.zero);
+      // Something mounting now has to learn this without any further event: the
+      // broadcast stream never replays the change it missed.
+      expect(platform.isScreenRecording, isTrue);
+
+      controller.add(false);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.isScreenRecording, isFalse);
+    });
+
+    test('survives a screen recording stream that is never answered', () async {
+      // No stream is provided, so the default event channel has no handler here:
+      // the eager subscription must swallow that rather than surface an unhandled
+      // error to the caller.
+      final platform = PigeonScreenshotShield(hostApi: _FakeHostApi());
+      await platform.startListening();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(platform.isScreenRecording, isFalse);
+    });
   });
 }

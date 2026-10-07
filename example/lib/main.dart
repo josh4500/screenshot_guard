@@ -36,11 +36,15 @@ class _HomeScreenState extends State<HomeScreen> {
   DateTime? lastDetected;
   Uint8List? lastImage;
   bool isScreenRecording = false;
-  bool hasScreenRecordingState = false;
+  int screenRecordingEvents = 0;
 
   @override
   void initState() {
     super.initState();
+    // Read the current state first: the stream only delivers *changes*, so a screen
+    // that appears while a recording is already running would otherwise show
+    // "not recording" until the next change.
+    isScreenRecording = shield.isScreenRecording;
     screenRecordingSubscription = shield.onScreenRecordingChanged.listen((
       value,
     ) {
@@ -49,7 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() {
         isScreenRecording = value;
-        hasScreenRecordingState = true;
+        screenRecordingEvents++;
       });
     });
   }
@@ -151,14 +155,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: isScreenRecording ? Colors.red : null,
                 ),
                 title: Text(
-                  !hasScreenRecordingState
-                      ? 'Waiting for a platform event...'
-                      : isScreenRecording
+                  isScreenRecording
                       ? 'The screen is being recorded'
                       : 'The screen is not being recorded',
                 ),
-                subtitle: const Text(
-                  'Android 15+, iOS; best-effort on Windows and Linux',
+                subtitle: Text(
+                  'Android 15+, iOS (the iOS simulator always reports "not '
+                  'recording"); best-effort on Windows and Linux · '
+                  '${screenRecordingEvents == 0 ? 'no state events yet' : '$screenRecordingEvents state event(s)'}',
                 ),
               ),
             ),

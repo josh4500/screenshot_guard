@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show protected;
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:screenshot_shield/src/pigeon_screenshot_shield.dart';
 
@@ -37,6 +38,28 @@ abstract class ScreenshotShieldPlatform extends PlatformInterface {
   /// emit. Observation is tied to [startListening]/[stopListening].
   Stream<bool> get onScreenRecordingChanged =>
       throw UnsupportedError('onScreenRecordingChanged() has not been implemented.');
+
+  /// Whether the app is currently visible in a screen recording (or a mirrored
+  /// screen).
+  ///
+  /// [onScreenRecordingChanged] only delivers *changes*, so anything that starts
+  /// watching while a recording is already running has to read the current state
+  /// here: the stream will not replay the change it missed. It is `false` until
+  /// the platform has reported a state.
+  bool get isScreenRecording => _screenRecordingActive;
+
+  bool _screenRecordingActive = false;
+
+  /// Records the state the platform reported, which is what [isScreenRecording]
+  /// returns from then on.
+  ///
+  /// Platform implementations call this when an event arrives; the
+  /// implementations shipped with this package already do, and an implementation
+  /// that never calls it simply leaves [isScreenRecording] `false`.
+  @protected
+  void reportScreenRecordingState(bool screenRecordingActive) {
+    _screenRecordingActive = screenRecordingActive;
+  }
 
   /// Starts observing for screenshots.
   Future<void> startListening() => throw UnsupportedError('startListening() has not been implemented.');

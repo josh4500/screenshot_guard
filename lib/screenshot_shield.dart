@@ -35,6 +35,15 @@ class ScreenshotShield {
   /// never emits on older versions.
   Stream<bool> get onScreenRecordingChanged => _platform.onScreenRecordingChanged;
 
+  /// Whether the app is currently visible in a screen recording (or a mirrored
+  /// screen).
+  ///
+  /// [onScreenRecordingChanged] only delivers *changes*; read this for the current
+  /// state, because the stream will not replay what a listener that arrived late
+  /// missed. A screen that appears while a recording is already running can
+  /// therefore check this once when it is built and still protect itself.
+  bool get isScreenRecording => _platform.isScreenRecording;
+
   /// Starts observing for screenshots.
   Future<void> startListening() => _platform.startListening();
 
