@@ -28,16 +28,37 @@ enum SecureCanvas {
         return field
     }
 
-    /// The private capture-excluded layer UIKit builds inside a secure text
-    /// field. The field's last sublayer is used as a fallback for the same
-    /// layer when the canvas view cannot be identified.
-    static func containerLayer(of field: UITextField) -> CALayer? {
+    /// The private, capture-excluded canvas view UIKit builds inside a secure
+    /// text field, or `nil` while the field has not been laid out yet.
+    ///
+    /// Hold the *view*, not just its layer, whenever the nesting has to survive
+    /// across layout passes: the canvas layer's `delegate` is this view, and that
+    /// property is `unowned(unsafe)`. A layer kept alive on its own can therefore
+    /// outlive the view and be left with a dangling delegate - touching it then
+    /// retains a deallocated object, which crashes in `objc_retain` (this is what
+    /// happens when UIKit rebuilds the private canvas during one of its own
+    /// layout or snapshot passes). Re-resolving the view from the field and
+    /// re-nesting is the safe pattern; see `ScreenshotShieldSensitiveView`.
+    static func containerView(of field: UITextField) -> UIView? {
         if let canvas = canvasView(in: field) {
-            log("secure canvas view: \(NSStringFromClass(type(of: canvas))), frame \(canvas.frame)")
-            return canvas.layer
+            return canvas
         }
         let subviews = field.subviews.map { NSStringFromClass(type(of: $0)) }
         log("no secure canvas view on the text field; subviews: \(subviews)")
+        return nil
+    }
+
+    /// The private capture-excluded layer UIKit builds inside a secure text
+    /// field. The field's last sublayer is used as a fallback for the same layer
+    /// when the canvas view cannot be identified.
+    ///
+    /// Only use this for an immediate nesting; anything that holds the result
+    /// across layout passes must hold [containerView(of:)] instead.
+    static func containerLayer(of field: UITextField) -> CALayer? {
+        if let canvas = containerView(of: field) {
+            log("secure canvas view: \(NSStringFromClass(type(of: canvas))), frame \(canvas.frame)")
+            return canvas.layer
+        }
         return field.layer.sublayers?.last
     }
 

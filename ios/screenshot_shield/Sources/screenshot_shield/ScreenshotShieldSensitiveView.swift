@@ -58,7 +58,13 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
     // internal canvas down when the view leaves the window). These are held
     // strongly so the layers that the snapshot layer is moved between stay
     // alive, and `isNested` tracks the move instead of comparing `superlayer`.
-    private var canvasLayer: CALayer?
+    //
+    // The canvas is held as its *view*, because the canvas layer's `delegate` is
+    // that view and is `unowned(unsafe)`: a canvas layer kept alive on its own can
+    // outlive its view and be left with a dangling delegate, which crashes in
+    // `objc_retain` as soon as the layer is touched again (UIKit rebuilding the
+    // private canvas during a system snapshot pass used to trigger exactly that).
+    private var canvasView: UIView?
     private var originalSuperlayer: CALayer?
     private var isNested = false
     private var enabled: Bool
@@ -200,22 +206,22 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
         container.layoutIfNeeded()
         field.layoutIfNeeded()
 
-        guard let canvas = SecureCanvas.containerLayer(of: field), !canvas.bounds.isEmpty else {
+        guard let canvasView = SecureCanvas.containerView(of: field), !canvasView.layer.bounds.isEmpty else {
             field.removeFromSuperview()
             SecureCanvas.log("sensitive view \(viewId): canvas not sized yet, retrying on layout")
             return
         }
 
         secureField = field
-        canvasLayer = canvas
+        self.canvasView = canvasView
         // The snapshot view is a subview of the region, so this is its
         // superlayer; `container.layer` avoids reading the unsafe property.
         originalSuperlayer = container.layer
         imageView.frame = container.bounds
-        nestSnapshot(in: canvas)
+        nestSnapshot(in: canvasView.layer)
         SecureCanvas.log(
             "sensitive view \(viewId): snapshot layer nested in "
-                + "\(NSStringFromClass(type(of: canvas))), frame \(imageView.layer.frame)"
+                + "\(NSStringFromClass(type(of: canvasView))), frame \(imageView.layer.frame)"
         )
     }
 
@@ -232,7 +238,7 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
         }
         secureField?.removeFromSuperview()
         secureField = nil
-        canvasLayer = nil
+        canvasView = nil
         originalSuperlayer = nil
         let state = container.window == nil ? "detached" : "attached"
         SecureCanvas.log("sensitive view \(viewId): protection removed (\(state))")
@@ -241,18 +247,38 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
     /// Re-nests the snapshot layer, which UIKit moves back when it lays the view
     /// out, and keeps the canvas aligned with the region.
     private func layoutProtectedRegion() {
-        guard let field = secureField, let canvas = canvasLayer else { return }
+        guard let field = secureField else { return }
+        guard container.window != nil, field.superview === container else {
+            // UIKit took the field's internals down (it does that during some of
+            // its own layout passes, and during a system snapshot). Drop what is
+            // left and rebuild the protection outside this layout pass.
+            removeProtection()
+            DispatchQueue.main.async { [weak self] in
+                self?.installProtection()
+            }
+            return
+        }
         let bounds = container.bounds
         imageView.frame = bounds
         field.frame = bounds
-        // Laying the field out is what gives the private canvas its size.
+        // Laying the field out is what gives the private canvas its size - and
+        // UIKit may replace that canvas while doing it, which is why it is
+        // re-resolved below instead of reusing the one cached at install time.
         field.setNeedsLayout()
         field.layoutIfNeeded()
-        nestSnapshot(in: canvas)
+        guard let canvasView = SecureCanvas.containerView(of: field) else {
+            // Mid-rebuild: keep the current nesting and try again on the next
+            // layout pass rather than touching a canvas that may be going away.
+            self.canvasView = nil
+            SecureCanvas.log("sensitive view \(viewId): canvas not available, keeping the current nesting")
+            return
+        }
+        self.canvasView = canvasView
+        nestSnapshot(in: canvasView.layer)
         if bounds.size != lastLoggedSize {
             lastLoggedSize = bounds.size
             SecureCanvas.log(
-                "sensitive view \(viewId): region \(bounds.size), canvas \(canvas.frame), "
+                "sensitive view \(viewId): region \(bounds.size), canvas \(canvasView.layer.frame), "
                     + "snapshot \(imageView.layer.frame)"
             )
         }
@@ -260,13 +286,17 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
 
     private func nestSnapshot(in canvas: CALayer) {
         // UIKit puts the layer back when it lays the view out, so re-nest every
-        // time rather than trusting `isNested` here.
+        // time rather than trusting `isNested` here. Implicit animations are
+        // disabled: this also runs inside UIKit's own layout and snapshot passes.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         imageView.layer.removeFromSuperlayer()
         canvas.addSublayer(imageView.layer)
-        isNested = true
         // The canvas sits at the region's origin and matches its bounds, so the
         // snapshot's frame in the canvas equals its frame in the region.
         imageView.layer.frame = imageView.frame
+        CATransaction.commit()
+        isNested = true
     }
 }
 

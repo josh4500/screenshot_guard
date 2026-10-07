@@ -9,7 +9,11 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     private var secureTextField: UITextField?
     private var protectedContentView: UIView?
     private weak var protectedContentSuperlayer: CALayer?
-    private weak var protectedContainerLayer: CALayer?
+    // Held as the canvas *view* rather than its layer: the canvas layer's
+    // `delegate` is that view and is `unowned(unsafe)`, so a layer kept alive on
+    // its own can outlive the view and be left with a dangling delegate (see
+    // SecureCanvas.containerView(of:)).
+    private var protectedContainerView: UIView?
     private var backgroundBlurEnabled = false
     private var backgroundBlurView: UIVisualEffectView?
     private var backgroundObserverTokens: [NSObjectProtocol] = []
@@ -108,16 +112,22 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     /// content layer's frame valid across the move and lets UIKit keep applying
     /// `view.frame` updates without shifting the content.
     private func enableCaptureProtection() {
-        if let contentView = protectedContentView, let container = protectedContainerLayer {
+        if let contentView = protectedContentView, let field = secureTextField {
             // Re-assert the nesting: UIKit can rebuild the window's layer tree
             // (for example while returning from the background), which moves the
             // content layer back under the window and silently disables the
             // protection. The guards call this again whenever a guarded screen
             // becomes active.
-            if contentView.layer.superlayer !== container {
-                contentView.layer.removeFromSuperlayer()
-                container.addSublayer(contentView.layer)
-                contentView.layer.frame = contentView.frame
+            //
+            // The canvas is re-resolved first, because UIKit can also rebuild the
+            // field's private canvas while the field itself stays alive.
+            guard let canvasView = SecureCanvas.containerView(of: field) else {
+                SecureCanvas.log("capture protection re-assert deferred: no secure canvas view")
+                return
+            }
+            protectedContainerView = canvasView
+            if contentView.layer.superlayer !== canvasView.layer {
+                nest(contentLayer: contentView.layer, in: canvasView.layer, frame: contentView.frame)
                 SecureCanvas.log("capture protection re-asserted")
             }
             return
@@ -138,41 +148,53 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         window.layoutIfNeeded()
         field.layoutIfNeeded()
 
-        guard let secureContainer = SecureCanvas.containerLayer(of: field) else {
+        guard let canvasView = SecureCanvas.containerView(of: field) else {
             field.removeFromSuperview()
-            SecureCanvas.log("capture protection failed: no secure container layer on the text field")
+            SecureCanvas.log("capture protection failed: no secure canvas view on the text field")
             return
         }
 
         let originalSuperlayer = contentView.layer.superlayer
-        contentView.layer.removeFromSuperlayer()
-        secureContainer.addSublayer(contentView.layer)
-        contentView.layer.frame = contentView.frame
+        nest(contentLayer: contentView.layer, in: canvasView.layer, frame: contentView.frame)
 
         secureTextField = field
         protectedContentView = contentView
         protectedContentSuperlayer = originalSuperlayer
-        protectedContainerLayer = secureContainer
+        protectedContainerView = canvasView
         SecureCanvas.log(
             "capture protection enabled: \(type(of: contentView)) layer nested in "
-                + "\(NSStringFromClass(type(of: secureContainer))), superlayer now "
+                + "\(NSStringFromClass(type(of: canvasView))), superlayer now "
                 + "\(contentView.layer.superlayer.map { NSStringFromClass(type(of: $0)) } ?? "nil")"
         )
     }
 
+    /// Moves [contentLayer] into the capture-excluded [canvas], without an
+    /// implicit animation: this can run inside UIKit's own layout passes.
+    private func nest(contentLayer: CALayer, in canvas: CALayer, frame: CGRect) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        contentLayer.removeFromSuperlayer()
+        canvas.addSublayer(contentLayer)
+        contentLayer.frame = frame
+        CATransaction.commit()
+    }
+
     private func disableCaptureProtection() {
         if let contentView = protectedContentView {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             contentView.layer.removeFromSuperlayer()
             let parent = protectedContentSuperlayer ?? Self.keyWindow()?.layer
             parent?.addSublayer(contentView.layer)
             contentView.layer.frame = contentView.frame
+            CATransaction.commit()
             SecureCanvas.log("capture protection disabled: content layer restored to \(String(describing: parent))")
         }
         secureTextField?.removeFromSuperview()
         secureTextField = nil
         protectedContentView = nil
         protectedContentSuperlayer = nil
-        protectedContainerLayer = nil
+        protectedContainerView = nil
     }
 
     public func setBackgroundBlur(blurEnabled: Bool) throws {
