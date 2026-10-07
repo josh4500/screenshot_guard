@@ -1,4 +1,4 @@
-## 0.1.6
+## 0.1.7
 
 * Add `ScreenshotShieldSensitiveView`, an experimental iOS-only widget that
   excludes a single region from screenshots and screen recordings instead of
@@ -14,6 +14,17 @@
   released. `ScreenshotShield.preventCaptureActive` exposes that state.
 * Add `SecureCanvas`, the shared secure-text-field helper used by the
   whole-window protection and the new region widget.
+* iOS: fix a crash when a sensitive region was disposed, for example when
+  popping the screen it lives on. Flutter disposes platform views from inside a
+  frame submit, so the rasterised layer is no longer moved back out of the
+  secure canvas from `deinit`; the view tree is simply released. The transparent
+  placeholder and the capture exclusion still behave the same while the region
+  is alive.
+
+## 0.1.6
+
+Skipped. This version was tagged but never published; its changes are part of
+0.1.7.
 
 ## 0.1.5
 
