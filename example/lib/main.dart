@@ -167,7 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const SecondScreen()),
               ),
-              child: const Text('Open granular protection demo'),
+              child: const Text('Open region shielding demo'),
             ),
           ],
         ),
