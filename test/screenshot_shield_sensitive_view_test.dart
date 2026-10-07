@@ -1,3 +1,6 @@
+// ignore_for_file: deprecated_member_use_from_same_package
+// The snapshot region is deprecated in favour of ScreenshotShieldSensitiveRegion;
+// its tests stay until it is removed in 0.2.0.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';

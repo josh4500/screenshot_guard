@@ -1,40 +1,43 @@
 ## 0.1.7
 
-* Add `ScreenshotShieldSensitiveView`, an experimental iOS-only widget that
-  excludes a single region from screenshots and screen recordings instead of
-  blanking the whole window. The subtree is rasterised into a native platform
-  view whose layer is nested in its own capture-excluded canvas layer, so the
-  rest of the app stays capturable. The region renders from a snapshot, so it is
-  only as fresh as the last refresh; `refreshInterval` or the widget's controller
-  can refresh it. Relies on undocumented UIKit behaviour and has to be verified
-  on a device.
-* `ScreenshotShieldSensitiveView` stands down while whole-window prevention is
-  active, since the region is blanked by the window anyway: no platform view is
-  created and no snapshot is taken. It activates again when the protection is
-  released. `ScreenshotShield.preventCaptureActive` exposes that state.
+* Add `ScreenshotShieldSensitiveRegion`, the cross-platform way to keep one part
+  of a screen out of captures. Its subtree stays live - correct layout through
+  size changes, animations, text input, anything Flutter draws on top of it - and
+  is shielded only while the screen is being recorded or mirrored (iOS, Android
+  15+) and while the app is not in the foreground, which keeps the region out of
+  the app-switcher snapshot. While shielded the child keeps its layout, stops
+  receiving pointers and leaves the semantics tree; set `blur` to blur the live
+  child instead of covering it, or `shielded` to drive the shield yourself. It
+  manages its own recording listener, and `startListening`/`stopListening` are
+  now reference counted, so several consumers (guards, regions) no longer cancel
+  each other's detection.
+* Deprecate `ScreenshotShieldSensitiveView`, the iOS-only snapshot region. It
+  works in this release and is removed in 0.2.0: it is frozen to a bitmap while
+  shown, Flutter overlays over it (a selection toolbar, a dialog) render behind
+  it, and it therefore cannot serve as a general region mechanism. Use
+  `ScreenshotShieldSensitiveRegion` for live widgets and
+  `setProtection(preventCapture: true)` / a `ScreenshotShieldRouteGuard` on
+  screens where a screenshot must come out blank.
+* `ScreenshotShieldSensitiveView`'s placeholder now defaults to the ambient
+  scaffold background instead of opaque black, so it no longer shows black behind
+  transparent parts of the child (rounded cells with transparent gaps, for
+  example); `placeholderColor` still overrides it.
 * Add `SecureCanvas`, the shared secure-text-field helper used by the
-  whole-window protection and the new region widget.
-* iOS: fix a crash when a sensitive region was disposed, for example when
-  popping the screen it lives on. Flutter disposes platform views from inside a
-  frame submit, so the rasterised layer is no longer moved back out of the
-  secure canvas from `deinit`; the view tree is simply released. The transparent
-  placeholder and the capture exclusion still behave the same while the region
-  is alive.
-* iOS: keep a sensitive region interactive. The capture placeholder sat above the
+  whole-window protection and the snapshot region.
+* iOS: fix a crash when a sensitive region was disposed, for example when popping
+  the screen it lives on. Flutter disposes platform views from inside a frame
+  submit, so the rasterised layer is no longer moved back out of the secure canvas
+  from `deinit`; the view tree is simply released.
+* iOS: keep the snapshot region interactive. Its placeholder sat above the
   wrapped subtree and, being opaque, absorbed pointers, so taps, drags, focus and
   text input never reached the widget inside the region. It is now transparent to
-  pointers, and the wrapped subtree behaves normally.
-* iOS: stop covering a sensitive region with the placeholder before the native
-  view holds a snapshot, which showed an opaque rectangle on screen. The child
-  stays visible instead (and the region is simply not excluded from captures
-  yet), the first snapshot is retried until it lands, and it is re-taken when the
-  region is laid out at a new size. `ScreenshotShieldSensitiveViewController`
-  captures after the next frame and coalesces bursts of requests, so refreshing
-  on a change - a text field's `onChanged`, for example - rasterises what was just
-  typed.
-* iOS: fix the region's platform view being rebuilt on every snapshot, which
-  reset the snapshot state and looped. The placeholder now stays in the tree and
-  only changes colour.
+  pointers.
+* iOS: stop covering the snapshot region with the placeholder before the native
+  view holds a snapshot, retry the first snapshot until it lands, re-take it when
+  the region is laid out at a new size, and coalesce refresh requests (which now
+  capture after the next frame).
+* iOS: fix the snapshot region's platform view being rebuilt on every snapshot,
+  which reset the snapshot state and looped.
 
 ## 0.1.6
 

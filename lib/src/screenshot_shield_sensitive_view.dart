@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Theme;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -31,11 +32,14 @@ import 'package:screenshot_shield/screenshot_shield.dart';
 ///   [ScreenshotShieldSensitiveViewController.refresh] when the content changes
 ///   (for example from a text field's `onChanged`, which captures after the next
 ///   frame).
-/// * [placeholderColor] is what a capture sees where the region is. It is only
-///   painted once the native view actually holds a snapshot, so an opaque
-///   rectangle never covers the region on screen: until the first snapshot
-///   arrives - and permanently, if rasterising keeps failing - [child] is shown
-///   and the region is simply not excluded from captures yet.
+/// * [placeholderColor] is what a capture sees where the region is, and it shows
+///   through any transparent part of [child] on screen (rounded cells with
+///   transparent gaps, for example), so it defaults to the ambient scaffold
+///   background and should be overridden when the region sits on something else.
+///   It is only painted once the native view actually holds a snapshot, so an
+///   opaque rectangle never covers the region before that: until the first
+///   snapshot arrives - and permanently, if rasterising keeps failing - [child]
+///   is shown and the region is simply not excluded from captures yet.
 /// * The widget derives from the same undocumented UIKit behaviour as the
 ///   whole-window protection, so it can break on any iOS release, and the
 ///   exclusion itself can only be confirmed on a real device. The region is
@@ -53,16 +57,28 @@ import 'package:screenshot_shield/screenshot_shield.dart';
 ///
 /// ```dart
 /// ScreenshotShieldSensitiveView(
-///   placeholderColor: Colors.black,
+///   // Defaults to the scaffold background; set it when the region sits on
+///   // something else, because it also shows through transparent parts of the
+///   // child.
+///   placeholderColor: Color(0xFFF4F1EC),
 ///   child: Text('Account number: 1234'),
 /// )
 /// ```
+@Deprecated(
+  'Use ScreenshotShieldSensitiveRegion for live widgets, which shields them '
+  'while the screen is recorded and while the app is in the background, or '
+  'ScreenshotShield.setProtection(preventCapture: true) / a '
+  'ScreenshotShieldRouteGuard on screens where a screenshot must come out '
+  'blank. This snapshot region is experimental, iOS only, shows a bitmap '
+  '(animations and text carets only update when it is refreshed, Flutter '
+  'overlays over it render behind it) and will be removed in 0.2.0.',
+)
 class ScreenshotShieldSensitiveView extends StatefulWidget {
   /// Creates a widget that hides [child] from screen capture on iOS.
   const ScreenshotShieldSensitiveView({
     super.key,
     required this.child,
-    this.placeholderColor = const Color(0xFF000000),
+    this.placeholderColor,
     this.refreshInterval,
     this.enabled = true,
     this.controller,
@@ -71,9 +87,16 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
   /// The subtree to hide from captures.
   final Widget child;
 
-  /// What a capture shows in place of [child]. Must be opaque: it is the only
-  /// thing standing between a screenshot and the rasterised subtree.
-  final Color placeholderColor;
+  /// What a capture shows in place of [child], and what shows through any part
+  /// of [child] that is transparent - which is why it has to match what is
+  /// behind the region.
+  ///
+  /// Defaults to the ambient [ThemeData.scaffoldBackgroundColor], which is what
+  /// most regions sit on. Set it explicitly when the region sits on something
+  /// else (a gradient, an image, a card), otherwise those transparent parts show
+  /// this colour on screen. It must stay opaque: it is the only thing standing
+  /// between a capture and the rasterised subtree.
+  final Color? placeholderColor;
 
   /// How often the native snapshot is refreshed while mounted, or `null` (the
   /// default) to only snapshot after the first frame and on resize. Frequent
@@ -153,6 +176,10 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
   /// `ScreenshotShield.setProtection(preventCapture: true)`: the region would be
   /// blanked anyway, so the platform view, the rasterising and the placeholder
   /// are all skipped.
+  /// The colour a capture shows in the region, and what shows through the
+  /// transparent parts of [ScreenshotShieldSensitiveView.child] on screen.
+  Color get _placeholderColor => widget.placeholderColor ?? Theme.of(context).scaffoldBackgroundColor;
+
   bool get _usesPlatformView =>
       ScreenshotShieldSensitiveView.isSupported && widget.enabled && !ScreenshotShield.preventCaptureActive.value;
 
@@ -347,7 +374,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
           // UiKitView below and reset its snapshot, which loops.
           Positioned.fill(
             child: IgnorePointer(
-              child: ColoredBox(color: _snapshotReady ? widget.placeholderColor : const Color(0x00000000)),
+              child: ColoredBox(color: _snapshotReady ? _placeholderColor : const Color(0x00000000)),
             ),
           ),
           // What the user sees: the rasterised subtree, excluded from captures.

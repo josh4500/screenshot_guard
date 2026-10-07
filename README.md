@@ -13,6 +13,7 @@ platform-specific:
 | Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
 | Screen-recording detection (`onScreenRecordingChanged`) | Yes - Android 15+ (API 35) reports whether the app's activities are visible in a screen recording via `DETECT_SCREEN_RECORDING`; older versions never emit | Yes - reflects `UIScreen.isCaptured`, which is also `true` while the screen is mirrored (for example via AirPlay); the simulator always reports not recording |
 | Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - the app's content layer is nested inside a secure text field's capture-excluded layer, so screenshots come out blank (undocumented UIKit behaviour, see [iOS configuration](#ios-configuration)) |
+| Region shielding (`ScreenshotShieldSensitiveRegion`) | Yes - hides the region while the app is not in the foreground, and while recording on Android 15+ | Yes - hides the region while recording or mirroring, and while the app is not in the foreground |
 | Screenshot events while protected | No - the secure window flag blanks the frame (it is never saved, so the media-store observer never fires) and, on Android 14+, the system withholds the capture callback for secure windows. The guards resolve this by dropping prevention when detection is also requested, so the event fires and the guarded screen is re-rasterized into a shareable image | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
 | Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) and `DETECT_SCREEN_RECORDING` (auto-granted, Android 15+ only); on Android 9 (API 28) and below, screenshot detection reads the media store and needs `READ_EXTERNAL_STORAGE`, which the host app must request at runtime | Not required |
 
@@ -108,52 +109,85 @@ user sees a black screenshot. To follow a Snapchat-style flow instead - let the
 screenshot succeed and react in `onScreenshotDetected` (for example by sending
 the captured image or notifying a peer) - set `preventCapture: false`.
 
-### Granular protection (experimental, iOS only)
+### Which protection for which situation
 
-`preventCapture` always covers the whole window: Flutter renders every widget
-into one surface, and capture exclusion is a property of a native view or layer.
-To leave the rest of the screen capturable, the guarded region has to own a
-native view:
+| Mechanism | Covers | Granularity | Rendering |
+|---|---|---|---|
+| `setProtection(preventCapture: true)` / `ScreenshotShieldRouteGuard` | screenshots, screen recordings, app-switcher snapshot | the whole window | untouched |
+| `ScreenshotShieldSensitiveRegion` | screen recordings (iOS, Android 15+) and the app-switcher snapshot (all platforms) | one subtree | untouched - the widget stays live |
+| `ScreenshotShieldSensitiveView` (deprecated) | screenshots, screen recordings, app-switcher snapshot | one subtree, **iOS only** | replaced by a bitmap while it is shown |
+
+So: use a guard on a screen that must come out blank in a screenshot, and a
+sensitive region to keep one part of the screen out of recordings and the app
+switcher while everything else stays live and shareable.
+
+**Why a screenshot cannot be covered per region:** iOS excludes a *native view's*
+own layer from captures, and Flutter renders every widget into one surface
+(`PlatformViewLayer` is the only composited native view; pictures, textures and
+filters all land in the same Flutter drawable). Live Flutter pixels therefore
+cannot be excluded from a foreground screenshot, and the only way to blank a
+region in a screenshot is to put a bitmap or native UI in a native view - which
+is what the deprecated widget below does. There is no `RenderObject`, layer or
+`Texture` that changes this.
+
+### Region shielding (screen recording and app switcher)
+
+`ScreenshotShieldSensitiveRegion` keeps its child live and hides it only while it
+matters:
 
 ```dart
-ScreenshotShieldSensitiveView(
-  placeholderColor: Colors.black,
+ScreenshotShieldSensitiveRegion(
   child: Text('Account number: 1234'),
 )
 ```
 
-The widget rasterises its subtree and displays the result in a platform view
-whose layer is nested in its own capture-excluded canvas, so a screenshot shows
-`placeholderColor` where the widget is and keeps everything else.
+It shields the subtree while the screen is being recorded or mirrored
+(`shieldWhileRecording`, reported by `onScreenRecordingChanged`: iOS and
+Android 15+) and while the app is not in the foreground (`shieldInBackground`,
+which keeps the region out of the app-switcher snapshot on every platform).
+While shielded the child is covered - by `shield`, or by an opaque `shieldColor`
+defaulting to the ambient scaffold background - or blurred when `blur` is set.
+Either way the child keeps its layout, so shielding never moves anything around
+it, and the subtree itself is never rasterised: it renders correctly through
+size changes, animations, text input and anything Flutter draws on top of it.
+While it is covered the child stops receiving pointers and leaves the semantics
+tree, so a hidden field cannot be typed into or read by assistive technology.
 
-It stands down automatically while whole-window prevention is active, that is
-while `setProtection(preventCapture: true)` is on (which is what the guards
-enable): the region would be blanked by the window anyway, so no platform view is
-created and nothing is rasterised. It activates again when that protection is
-released, so a guarded screen can host regions without paying for them.
+Also useful: `shielded` overrides the automatic triggers, for app-driven rules
+(for example "shield while a session is active") or to preview the shield.
 
-It is a prototype, and these are its costs:
+The region reads its `ScreenshotShield` from the nearest
+`ScreenshotShieldScope`, and creates one if there is no scope above it. It takes
+care of `startListening`/`stopListening` itself; those calls are reference
+counted, so a region and a guard can be active at the same time without
+cancelling each other.
+
+Gaps to be aware of: Android 14 and older cannot report screen recording, so
+`shieldWhileRecording` never fires there - use `preventCapture` on those devices.
+A foreground screenshot is not covered (see above); use a guard on screens that
+must come out blank.
+
+### Deprecated: snapshot region (`ScreenshotShieldSensitiveView`)
+
+`ScreenshotShieldSensitiveView` is deprecated and will be removed in 0.2.0. It
+was an attempt at covering *screenshots* per region: it rasterises its subtree
+and displays the bitmap in a platform view whose layer is nested in its own
+capture-excluded canvas. That works only for effectively static content, and it
+is iOS only:
 
 - The region is displayed from a snapshot, so animations, video and text carets
-  are only as fresh as the last refresh. Set `refreshInterval` to refresh
-  periodically (each refresh reads the subtree back from the GPU), or call
-  `ScreenshotShieldSensitiveViewController.refresh()` when the content changes -
-  it captures after the next frame, so calling it from a text field's `onChanged`
-  rasterises what was just typed.
-- The wrapped subtree stays live and interactive: the platform view and the
-  placeholder are transparent to pointers, so taps, drags, focus and text input
-  reach it normally even though the user is looking at a snapshot.
-- `placeholderColor` is what a capture sees in the region. It is only painted
-  once the native view holds a snapshot, so an opaque rectangle never covers the
-  region on screen: until the first snapshot lands (and permanently, if
-  rasterising keeps failing) the child itself is shown and the region is not yet
-  excluded from captures. Keep the color opaque, otherwise the rasterised
-  subtree can reach a capture once the placeholder is in use.
-- iOS only. On other platforms the widget is a no-op and builds its child
-  directly. Android's granular equivalents are `View.setContentSensitivity`
-  (API 35+) or `SurfaceView.setSecure`, both of which need a native view.
+  are only as fresh as the last refresh (`refreshInterval`, or
+  `ScreenshotShieldSensitiveViewController.refresh()`, which captures after the
+  next frame). A resize re-rasterises, but the native view scales the previous
+  bitmap until it does.
 - The region is a native view, so it renders above the Flutter content: anything
-  Flutter paints over it (a dialog, a tooltip) shows up behind it.
+  Flutter paints over it (a selection toolbar, a dialog, a tooltip) shows up
+  behind it.
+- `placeholderColor` is what a capture sees in the region *and* what shows
+  through any transparent part of the child on screen, so it defaults to the
+  ambient scaffold background and should be set when the region sits on a
+  gradient, an image or a card. It is only painted once the native view holds a
+  snapshot, so an opaque rectangle never covers the region before that.
 - It derives from the same undocumented UIKit behaviour as the whole-window
   protection, so verify it on a real device. `xcrun simctl io screenshot` cannot
   show capture exclusion at all.

@@ -198,9 +198,8 @@ class SecondScreen extends StatefulWidget {
 }
 
 class _SecondScreenState extends State<SecondScreen> {
-  final ScreenshotShieldSensitiveViewController _region =
-      ScreenshotShieldSensitiveViewController();
   final TextEditingController _text = TextEditingController();
+  bool _previewShield = false;
 
   @override
   void dispose() {
@@ -211,19 +210,27 @@ class _SecondScreenState extends State<SecondScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Granular protection')),
+      appBar: AppBar(title: const Text('Region shielding')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'This route is not guarded, so whole-window protection is off. Only '
-            'the region below is excluded from captures.',
+            'This route is not guarded, so whole-window protection is off. The '
+            'region below stays live - it renders and accepts input normally - and '
+            'hides itself while the screen is recorded or the app leaves the '
+            'foreground.',
           ),
-          const SizedBox(height: 16),
-          const Text('Not protected (visible in a screenshot):'),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('Preview shield'),
+            subtitle: const Text('Hide the region, as it does while recording'),
+            value: _previewShield,
+            onChanged: (value) => setState(() => _previewShield = value),
+          ),
+          const Text('Ordinary content (never shielded):'),
           const SizedBox(height: 8),
           Container(
-            height: 80,
+            height: 64,
             alignment: Alignment.center,
             color: Colors.teal,
             child: const Text(
@@ -233,12 +240,11 @@ class _SecondScreenState extends State<SecondScreen> {
           ),
           const SizedBox(height: 24),
           const Text(
-            'Protected region (blank in a screenshot, still interactive):',
+            'Sensitive region (shielded while recording or backgrounded):',
           ),
           const SizedBox(height: 8),
-          ScreenshotShieldSensitiveView(
-            controller: _region,
-            refreshInterval: const Duration(milliseconds: 250),
+          ScreenshotShieldSensitiveRegion(
+            shielded: _previewShield ? true : null,
             child: Container(
               padding: const EdgeInsets.all(12),
               color: Colors.deepOrange,
@@ -257,7 +263,7 @@ class _SecondScreenState extends State<SecondScreen> {
                     cursorColor: Colors.white,
                     decoration: const InputDecoration(
                       isDense: true,
-                      hintText: 'Tap and type: input must reach this field',
+                      hintText: 'Tap and type: the region stays live',
                       hintStyle: TextStyle(color: Colors.white70),
                       enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(color: Colors.white54),
@@ -266,9 +272,6 @@ class _SecondScreenState extends State<SecondScreen> {
                         borderSide: BorderSide(color: Colors.white),
                       ),
                     ),
-                    // The visible pixels are a snapshot, so refresh it on change
-                    // to rasterise what was just typed.
-                    onChanged: (_) => _region.refresh(),
                   ),
                 ],
               ),
@@ -276,10 +279,13 @@ class _SecondScreenState extends State<SecondScreen> {
           ),
           const SizedBox(height: 24),
           const Text(
-            'Take a screenshot with the hardware buttons: the teal block above is '
-            'captured, the orange region comes out blank. The field inside the '
-            'region still focuses and accepts typing, and its text updates because '
-            'onChanged refreshes the snapshot.',
+            'Start a screen recording from Control Center and this region hides '
+            'itself (use "Preview shield" to see it without recording). Background '
+            'the app and it is hidden in the app switcher too. A foreground '
+            'screenshot is not covered, because iOS cannot exclude live Flutter '
+            'pixels from a capture - screens that must come out blank use '
+            'whole-window prevention instead, which is what the home screen of '
+            'this demo does.',
           ),
         ],
       ),

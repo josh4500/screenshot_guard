@@ -33,13 +33,50 @@ void main() {
       expect(hostApi.calls, contains('startListening'));
     });
 
-    test('forwards stopListening to the host api', () async {
+    test('starts the host only once for several consumers', () async {
+      final hostApi = _FakeHostApi();
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
+
+      await platform.startListening();
+      await platform.startListening();
+
+      expect(hostApi.calls, ['startListening']);
+      expect(platform.isListening, isTrue);
+    });
+
+    test('keeps the host listening while another consumer still listens', () async {
+      final hostApi = _FakeHostApi();
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
+
+      await platform.startListening();
+      await platform.startListening();
+      await platform.stopListening();
+
+      expect(hostApi.calls, ['startListening']);
+      expect(platform.isListening, isTrue);
+    });
+
+    test('stops the host when the last consumer stops', () async {
+      final hostApi = _FakeHostApi();
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
+
+      await platform.startListening();
+      await platform.startListening();
+      await platform.stopListening();
+      await platform.stopListening();
+
+      expect(hostApi.calls, ['startListening', 'stopListening']);
+      expect(platform.isListening, isFalse);
+    });
+
+    test('ignores stopListening without consumers', () async {
       final hostApi = _FakeHostApi();
       final platform = PigeonScreenshotShield(hostApi: hostApi);
 
       await platform.stopListening();
 
-      expect(hostApi.calls, contains('stopListening'));
+      expect(hostApi.calls, isEmpty);
+      expect(platform.isListening, isFalse);
     });
 
     test('forwards setProtected to the host api', () async {
