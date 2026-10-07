@@ -20,11 +20,27 @@
   secure canvas from `deinit`; the view tree is simply released. The transparent
   placeholder and the capture exclusion still behave the same while the region
   is alive.
+* iOS: keep a sensitive region interactive. The capture placeholder sat above the
+  wrapped subtree and, being opaque, absorbed pointers, so taps, drags, focus and
+  text input never reached the widget inside the region. It is now transparent to
+  pointers, and the wrapped subtree behaves normally.
+* iOS: stop covering a sensitive region with the placeholder before the native
+  view holds a snapshot, which showed an opaque rectangle on screen. The child
+  stays visible instead (and the region is simply not excluded from captures
+  yet), the first snapshot is retried until it lands, and it is re-taken when the
+  region is laid out at a new size. `ScreenshotShieldSensitiveViewController`
+  captures after the next frame and coalesces bursts of requests, so refreshing
+  on a change - a text field's `onChanged`, for example - rasterises what was just
+  typed.
+* iOS: fix the region's platform view being rebuilt on every snapshot, which
+  reset the snapshot state and looped. The placeholder now stays in the tree and
+  only changes colour.
 
 ## 0.1.6
 
-Skipped. This version was tagged but never published; its changes are part of
-0.1.7.
+Not recommended: the sensitive region platform view in this version crashed when
+it was disposed, did not receive pointer events, and could cover the region with
+an opaque placeholder on screen. Use 0.1.7, which fixes all three.
 
 ## 0.1.5
 
