@@ -108,6 +108,52 @@ user sees a black screenshot. To follow a Snapchat-style flow instead - let the
 screenshot succeed and react in `onScreenshotDetected` (for example by sending
 the captured image or notifying a peer) - set `preventCapture: false`.
 
+### Granular protection (experimental, iOS only)
+
+`preventCapture` always covers the whole window: Flutter renders every widget
+into one surface, and capture exclusion is a property of a native view or layer.
+To leave the rest of the screen capturable, the guarded region has to own a
+native view:
+
+```dart
+ScreenshotShieldSensitiveView(
+  placeholderColor: Colors.black,
+  child: Text('Account number: 1234'),
+)
+```
+
+The widget rasterises its subtree and displays the result in a platform view
+whose layer is nested in its own capture-excluded canvas, so a screenshot shows
+`placeholderColor` where the widget is and keeps everything else.
+
+It stands down automatically while whole-window prevention is active, that is
+while `setProtection(preventCapture: true)` is on (which is what the guards
+enable): the region would be blanked by the window anyway, so no platform view is
+created and nothing is rasterised. It activates again when that protection is
+released, so a guarded screen can host regions without paying for them.
+
+It is a prototype, and these are its costs:
+
+- The region is displayed from a snapshot, so animations, video and text carets
+  are only as fresh as the last refresh. Set `refreshInterval` to refresh
+  periodically (each refresh reads the subtree back from the GPU), or call
+  `ScreenshotShieldSensitiveViewController.refresh()` when the content changes.
+- The subtree is still laid out underneath so touches keep working, but it is
+  covered by an opaque placeholder: keep [placeholderColor] opaque, otherwise
+  the rasterised subtree can reach a capture.
+- iOS only. On other platforms the widget is a no-op and builds its child
+  directly. Android's granular equivalents are `View.setContentSensitivity`
+  (API 35+) or `SurfaceView.setSecure`, both of which need a native view.
+- The region is a native view, so it renders above the Flutter content: anything
+  Flutter paints over it (a dialog, a tooltip) shows up behind it.
+- It derives from the same undocumented UIKit behaviour as the whole-window
+  protection, so verify it on a real device. `xcrun simctl io screenshot` cannot
+  show capture exclusion at all.
+
+Note that Flutter's own `SensitiveContent` widget is *not* an alternative here:
+any `SensitiveContent(sensitive:)` in the tree obscures the **entire screen**
+during media projection, and only on Android 15+.
+
 ### Background privacy
 
 Screenshot detection only runs while the app is in the foreground, so a user

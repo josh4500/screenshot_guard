@@ -167,7 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const SecondScreen()),
               ),
-              child: const Text('Open second screen (unprotect)'),
+              child: const Text('Open granular protection demo'),
             ),
           ],
         ),
@@ -196,9 +196,59 @@ class SecondScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Second screen')),
-      body: const Center(
-        child: Text('This route is not guarded. Protection is released here.'),
+      appBar: AppBar(title: const Text('Granular protection')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text(
+            'This route is not guarded, so whole-window protection is off. Only '
+            'the region below is excluded from captures.',
+          ),
+          const SizedBox(height: 16),
+          const Text('Not protected (visible in a screenshot):'),
+          const SizedBox(height: 8),
+          Container(
+            height: 80,
+            alignment: Alignment.center,
+            color: Colors.teal,
+            child: const Text(
+              'Ordinary content',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text('Protected region (blank in a screenshot):'),
+          const SizedBox(height: 8),
+          ScreenshotShieldSensitiveView(
+            refreshInterval: const Duration(milliseconds: 250),
+            child: Container(
+              height: 120,
+              alignment: Alignment.center,
+              color: Colors.deepOrange,
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Sensitive region',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Expires 09/29 · CVV 123',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'iOS only. On a device, take a screenshot: the teal block above is '
+            'captured, the orange region is blank. `xcrun simctl io screenshot` '
+            'cannot show this, because it reads the simulator framebuffer '
+            'without applying capture exclusion.',
+          ),
+        ],
       ),
     );
   }

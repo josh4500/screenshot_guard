@@ -1,0 +1,217 @@
+import Flutter
+import UIKit
+
+/// Registers the platform view behind `ScreenshotShieldSensitiveView`.
+///
+/// EXPERIMENTAL. This is a prototype of *per-region* capture exclusion on iOS:
+/// instead of excluding the whole Flutter view (what
+/// `setProtection(preventCapture: true)` does), the region occupied by one
+/// platform view is nested into its own secure canvas layer, so only that
+/// region is left out of screenshots and screen recordings.
+///
+/// It depends on the same undocumented UIKit behaviour as the whole-window
+/// protection, and the region is displayed from a Flutter-rendered snapshot, so
+/// animations, video and text cursors inside it are only as fresh as the last
+/// refresh.
+final class ScreenshotShieldSensitiveViewFactory: NSObject, FlutterPlatformViewFactory {
+    /// The `UiKitView` view type that maps to this factory.
+    static let viewType = "screenshot_shield/sensitive_view"
+
+    private let messenger: FlutterBinaryMessenger
+
+    init(messenger: FlutterBinaryMessenger) {
+        self.messenger = messenger
+        super.init()
+    }
+
+    func create(
+        withFrame frame: CGRect,
+        viewIdentifier viewId: Int64,
+        arguments args: Any?
+    ) -> FlutterPlatformView {
+        ScreenshotShieldSensitivePlatformView(
+            frame: frame,
+            viewId: viewId,
+            messenger: messenger,
+            arguments: args
+        )
+    }
+
+    func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+        FlutterStandardMessageCodec.sharedInstance()
+    }
+}
+
+/// The native side of one guarded region.
+///
+/// It draws the Flutter-rendered snapshot it receives over the method channel
+/// and keeps its own layer nested in a secure canvas layer so that the region
+/// is excluded from system captures. Everything Flutter draws underneath the
+/// region (the widget's placeholder) is what a capture shows instead.
+final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView {
+    private let container: SecureRegionView
+    private let imageView = UIImageView()
+    private let channel: FlutterMethodChannel
+    private var secureField: UITextField?
+    private weak var canvasLayer: CALayer?
+    private weak var originalSuperlayer: CALayer?
+    private var enabled: Bool
+    private var lastLoggedSize: CGSize = .zero
+    private let viewId: Int64
+
+    init(frame: CGRect, viewId: Int64, messenger: FlutterBinaryMessenger, arguments: Any?) {
+        container = SecureRegionView(frame: frame)
+        self.viewId = viewId
+        channel = FlutterMethodChannel(
+            name: "\(ScreenshotShieldSensitiveViewFactory.viewType)/\(viewId)",
+            binaryMessenger: messenger
+        )
+        enabled = (arguments as? [String: Any])?["enabled"] as? Bool ?? true
+        super.init()
+
+        container.backgroundColor = .clear
+        container.clipsToBounds = true
+        imageView.frame = container.bounds
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        imageView.contentMode = .scaleToFill
+        imageView.backgroundColor = .clear
+        container.addSubview(imageView)
+        container.onLayout = { [weak self] in
+            guard let self else { return }
+            if self.secureField == nil {
+                self.installProtection()
+            } else {
+                self.layoutProtectedRegion()
+            }
+        }
+
+        channel.setMethodCallHandler { [weak self] call, result in
+            guard let self else {
+                result(FlutterMethodNotImplemented)
+                return
+            }
+            switch call.method {
+            case "setSnapshot":
+                let data = (call.arguments as? [String: Any])?["bytes"] as? FlutterStandardTypedData
+                self.imageView.image = data.flatMap { UIImage(data: $0.data) }
+                result(nil)
+            case "setEnabled":
+                self.enabled = (call.arguments as? Bool) ?? true
+                if self.enabled {
+                    self.installProtection()
+                } else {
+                    self.removeProtection()
+                }
+                result(nil)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
+        if enabled {
+            installProtection()
+        }
+    }
+
+    func view() -> UIView {
+        container
+    }
+
+    deinit {
+        channel.setMethodCallHandler(nil)
+        removeProtection()
+    }
+
+    // MARK: - Capture exclusion
+
+    private func installProtection() {
+        // Flutter creates the platform view before it has been given a size, so
+        // wait for the first real layout; `onLayout` retries.
+        guard enabled, secureField == nil, !container.bounds.isEmpty else { return }
+
+        // The field is added *inside* the region, so the secure canvas inherits
+        // every transform and clip Flutter applies to the platform view
+        // (scrolling, rotation, keyboard insets) and no geometry has to be
+        // mirrored into window coordinates. Flutter positions iOS platform
+        // views with a layer transform, which view-to-view conversion does not
+        // reflect.
+        let field = SecureCanvas.makeField(frame: container.bounds)
+        field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(field)
+        container.layoutIfNeeded()
+        field.layoutIfNeeded()
+
+        guard let canvas = SecureCanvas.containerLayer(of: field), !canvas.bounds.isEmpty else {
+            field.removeFromSuperview()
+            SecureCanvas.log("sensitive view \(viewId): canvas not sized yet, retrying on layout")
+            return
+        }
+
+        secureField = field
+        canvasLayer = canvas
+        originalSuperlayer = imageView.layer.superlayer
+        imageView.frame = container.bounds
+        nestSnapshot(in: canvas)
+        SecureCanvas.log(
+            "sensitive view \(viewId): snapshot layer nested in "
+                + "\(NSStringFromClass(type(of: canvas))), frame \(imageView.layer.frame)"
+        )
+    }
+
+    private func removeProtection() {
+        if let original = originalSuperlayer, imageView.layer.superlayer !== original {
+            imageView.layer.removeFromSuperlayer()
+            original.addSublayer(imageView.layer)
+        }
+        secureField?.removeFromSuperview()
+        secureField = nil
+        canvasLayer = nil
+        originalSuperlayer = nil
+    }
+
+    /// Re-nests the snapshot layer, which UIKit moves back when it lays the view
+    /// out, and keeps the canvas aligned with the region.
+    private func layoutProtectedRegion() {
+        guard let field = secureField, let canvas = canvasLayer else { return }
+        let bounds = container.bounds
+        imageView.frame = bounds
+        field.frame = bounds
+        // Laying the field out is what gives the private canvas its size.
+        field.setNeedsLayout()
+        field.layoutIfNeeded()
+        nestSnapshot(in: canvas)
+        if bounds.size != lastLoggedSize {
+            lastLoggedSize = bounds.size
+            SecureCanvas.log(
+                "sensitive view \(viewId): region \(bounds.size), canvas \(canvas.frame), "
+                    + "snapshot \(imageView.layer.frame)"
+            )
+        }
+    }
+
+    private func nestSnapshot(in canvas: CALayer) {
+        if imageView.layer.superlayer !== canvas {
+            imageView.layer.removeFromSuperlayer()
+            canvas.addSublayer(imageView.layer)
+        }
+        // The canvas sits at the region's origin and matches its bounds, so the
+        // snapshot's frame in the canvas equals its frame in the region.
+        imageView.layer.frame = imageView.frame
+    }
+}
+
+/// A container that reports layout changes so the protected region can be
+/// re-nested and re-aligned when Flutter resizes or moves it.
+final class SecureRegionView: UIView {
+    var onLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onLayout?()
+    }
+}

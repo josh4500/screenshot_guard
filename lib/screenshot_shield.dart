@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
 
 export 'src/screenshot_shield_guard.dart';
 export 'src/screenshot_shield_route_guard.dart';
 export 'src/screenshot_shield_scope.dart';
+export 'src/screenshot_shield_sensitive_view.dart';
 
 /// Guards a screen against being captured by the user.
 ///
@@ -39,6 +41,18 @@ class ScreenshotShield {
   /// Stops observing for screenshots.
   Future<void> stopListening() => _platform.stopListening();
 
+  /// Whether whole-window capture prevention is currently enabled.
+  ///
+  /// This reflects the last `preventCapture` value passed to [setProtection] on
+  /// any [ScreenshotShield] in the process, which is what the platform plugin
+  /// applies - capture prevention is a property of the window, not of a
+  /// [ScreenshotShield] instance. [ScreenshotShieldSensitiveView] listens to it
+  /// so that a guarded region stays inactive (and does no rasterising) while the
+  /// whole window is already excluded from captures.
+  static ValueListenable<bool> get preventCaptureActive => _preventCaptureActive;
+
+  static final ValueNotifier<bool> _preventCaptureActive = ValueNotifier<bool>(false);
+
   /// Configures screen protection.
   ///
   /// [preventCapture] prevents screen capture while the guarded route is in
@@ -62,6 +76,7 @@ class ScreenshotShield {
   Future<void> setProtection({bool? preventCapture, bool? backgroundBlur}) async {
     if (preventCapture != null) {
       await _platform.setProtected(protected: preventCapture);
+      _preventCaptureActive.value = preventCapture;
     }
     if (backgroundBlur != null) {
       await _platform.setBackgroundBlur(blurEnabled: backgroundBlur);
