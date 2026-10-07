@@ -190,8 +190,23 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-class SecondScreen extends StatelessWidget {
+class SecondScreen extends StatefulWidget {
   const SecondScreen({super.key});
+
+  @override
+  State<SecondScreen> createState() => _SecondScreenState();
+}
+
+class _SecondScreenState extends State<SecondScreen> {
+  final ScreenshotShieldSensitiveViewController _region =
+      ScreenshotShieldSensitiveViewController();
+  final TextEditingController _text = TextEditingController();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -217,25 +232,43 @@ class SecondScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          const Text('Protected region (blank in a screenshot):'),
+          const Text(
+            'Protected region (blank in a screenshot, still interactive):',
+          ),
           const SizedBox(height: 8),
           ScreenshotShieldSensitiveView(
+            controller: _region,
             refreshInterval: const Duration(milliseconds: 250),
             child: Container(
-              height: 120,
-              alignment: Alignment.center,
+              padding: const EdgeInsets.all(12),
               color: Colors.deepOrange,
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Sensitive region',
-                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  const Text(
+                    'Sensitive region · Expires 09/29',
+                    style: TextStyle(color: Colors.white, fontSize: 16),
                   ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Expires 09/29 · CVV 123',
-                    style: TextStyle(color: Colors.white),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _text,
+                    style: const TextStyle(color: Colors.white),
+                    cursorColor: Colors.white,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Tap and type: input must reach this field',
+                      hintStyle: TextStyle(color: Colors.white70),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white54),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white),
+                      ),
+                    ),
+                    // The visible pixels are a snapshot, so refresh it on change
+                    // to rasterise what was just typed.
+                    onChanged: (_) => _region.refresh(),
                   ),
                 ],
               ),
@@ -243,10 +276,10 @@ class SecondScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Text(
-            'iOS only. On a device, take a screenshot: the teal block above is '
-            'captured, the orange region is blank. `xcrun simctl io screenshot` '
-            'cannot show this, because it reads the simulator framebuffer '
-            'without applying capture exclusion.',
+            'Take a screenshot with the hardware buttons: the teal block above is '
+            'captured, the orange region comes out blank. The field inside the '
+            'region still focuses and accepts typing, and its text updates because '
+            'onChanged refreshes the snapshot.',
           ),
         ],
       ),
