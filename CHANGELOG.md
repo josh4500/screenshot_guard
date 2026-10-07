@@ -1,3 +1,20 @@
+## 0.1.6
+
+* Add `ScreenshotShieldSensitiveView`, an experimental iOS-only widget that
+  excludes a single region from screenshots and screen recordings instead of
+  blanking the whole window. The subtree is rasterised into a native platform
+  view whose layer is nested in its own capture-excluded canvas layer, so the
+  rest of the app stays capturable. The region renders from a snapshot, so it is
+  only as fresh as the last refresh; `refreshInterval` or the widget's controller
+  can refresh it. Relies on undocumented UIKit behaviour and has to be verified
+  on a device.
+* `ScreenshotShieldSensitiveView` stands down while whole-window prevention is
+  active, since the region is blanked by the window anyway: no platform view is
+  created and no snapshot is taken. It activates again when the protection is
+  released. `ScreenshotShield.preventCaptureActive` exposes that state.
+* Add `SecureCanvas`, the shared secure-text-field helper used by the
+  whole-window protection and the new region widget.
+
 ## 0.1.5
 
 * iOS: fix `preventCapture` not blanking screenshots. The secure text field was
