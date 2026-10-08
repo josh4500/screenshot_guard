@@ -229,6 +229,34 @@ void main() {
       expect(find.byType(UiKitView), findsNothing);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
+    testWidgets('whileRecording ignores the app lifecycle entirely', (WidgetTester tester) async {
+      await tester.pumpWidget(region(protection: SensitiveProtection.whileRecording));
+      expect(find.byType(UiKitView), findsNothing);
+
+      // Going to the background must not engage it in this mode.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      expect(find.byType(UiKitView), findsNothing);
+
+      // A recording must.
+      await emitRecording(tester, true);
+      expect(find.byType(UiKitView), findsOneWidget);
+      await settleSnapshot(tester);
+      expect(renderRegion(tester).captureColor, isNotNull);
+
+      // A recording that starts while the app is backgrounded still engages it.
+      await emitRecording(tester, false);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      expect(find.byType(UiKitView), findsNothing);
+      await emitRecording(tester, true);
+      expect(find.byType(UiKitView), findsOneWidget);
+
+      await emitRecording(tester, false);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
     testWidgets('engages while the app is not in the foreground', (WidgetTester tester) async {
       await tester.pumpWidget(region());
 

@@ -114,6 +114,7 @@ the captured image or notifying a peer) - set `preventCapture: false`.
 | Mechanism | Covers | Granularity | What the user sees |
 |---|---|---|---|
 | `setProtection(preventCapture: true)` / `ScreenshotShieldRouteGuard` | screenshots, screen recordings, app-switcher snapshot | the whole window | the app itself, untouched |
+| `ScreenshotShieldSensitiveView` (`whileRecording`) | screen recordings and mirroring | one subtree, **iOS only** | the original widget, untouched |
 | `ScreenshotShieldSensitiveView` (`whileCaptured`, the default) | screen recordings and mirroring, app-switcher snapshot | one subtree, **iOS only** | the original widget, untouched |
 | `ScreenshotShieldSensitiveView(protection: always)` | the above plus foreground screenshots | one subtree, **iOS only** | a continuously refreshed copy of the subtree |
 
@@ -155,7 +156,8 @@ takes over only while protection is needed:
   what lets a region that appears during a recording engage immediately instead of
   waiting for the next change, and
 - while the app is not in the foreground, which is what keeps the region out of the
-  app-switcher snapshot.
+  app-switcher snapshot (set `protection: SensitiveProtection.whileRecording` to drop
+  this case and protect recordings only).
 
 While it is engaged, the subtree stays live and interactive - taps, drags, focus and
 text input reach `child` as usual - and a platform view whose layer is nested in its

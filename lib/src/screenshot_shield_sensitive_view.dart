@@ -10,7 +10,17 @@ import 'package:screenshot_shield/screenshot_shield.dart';
 
 /// When [ScreenshotShieldSensitiveView] keeps the region out of captures.
 enum SensitiveProtection {
-  /// The region is protected while the screen is being recorded or mirrored and
+  /// The region is protected only while the screen is being recorded or mirrored
+  /// (or, on iOS, mirrored such as via AirPlay).
+  ///
+  /// Nothing happens to the region when the app goes to the background, so it can
+  /// still appear in the app-switcher snapshot; enable
+  /// `ScreenshotShield.setProtection(backgroundBlur: true)` as well if that
+  /// matters. Foreground screenshots are not covered either - use whole-window
+  /// protection for those.
+  whileRecording,
+
+  /// The region is protected while the screen is being recorded or mirrored **and**
   /// while the app is not in the foreground (which is what keeps it out of the
   /// app-switcher snapshot). This is the default.
   ///
@@ -49,6 +59,12 @@ enum SensitiveProtection {
 ///   callback), and
 /// * while the app is not in the foreground, which keeps the region out of the
 ///   app-switcher snapshot.
+///
+/// [protection] selects that set: [SensitiveProtection.whileRecording] protects
+/// only while the screen is being recorded or mirrored,
+/// [SensitiveProtection.whileCaptured] (the default) adds the background case, and
+/// [SensitiveProtection.always] keeps the region engaged permanently for apps that
+/// also need foreground screenshots blanked.
 ///
 /// While it is engaged, the guard is a platform view whose layer is nested in its
 /// own capture-excluded canvas: a capture gets no pixels from the region and
@@ -226,14 +242,19 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
   Color get _backdropColor => widget.backdropColor ?? Theme.of(context).scaffoldBackgroundColor;
 
   /// Whether the recording state has to be watched.
-  bool get _watchesRecording => widget.protection == SensitiveProtection.whileCaptured;
+  bool get _watchesRecording => widget.protection != SensitiveProtection.always;
 
   /// Whether the region is currently kept out of captures.
-  bool get _engaged =>
-      ScreenshotShieldSensitiveView.isSupported &&
-      widget.enabled &&
-      !ScreenshotShield.preventCaptureActive.value &&
-      (_watchesRecording ? (_recording || !_foreground) : true);
+  bool get _engaged {
+    if (!ScreenshotShieldSensitiveView.isSupported || !widget.enabled || ScreenshotShield.preventCaptureActive.value) {
+      return false;
+    }
+    return switch (widget.protection) {
+      SensitiveProtection.whileRecording => _recording,
+      SensitiveProtection.whileCaptured => _recording || !_foreground,
+      SensitiveProtection.always => true,
+    };
+  }
 
   @override
   void initState() {

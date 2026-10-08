@@ -1,3 +1,11 @@
+## 0.1.10
+
+* Add `SensitiveProtection.whileRecording` to `ScreenshotShieldSensitiveView`: the
+  region engages only while the screen is being recorded or mirrored, and ignores
+  the app lifecycle, so it stays untouched (and the app-switcher snapshot keeps
+  showing it) when the app goes to the background. `whileCaptured` remains the
+  default and adds that background case; `always` is unchanged.
+
 ## 0.1.9
 
 * Fix `ScreenshotShieldSensitiveView` staying unprotected when it appeared while

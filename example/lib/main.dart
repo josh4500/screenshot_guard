@@ -205,7 +205,7 @@ class _SecondScreenState extends State<SecondScreen> {
   final TextEditingController _text = TextEditingController();
   Timer? _ticker;
   int _seconds = 0;
-  bool _alwaysProtect = false;
+  SensitiveProtection _protection = SensitiveProtection.whileCaptured;
 
   @override
   void initState() {
@@ -235,20 +235,42 @@ class _SecondScreenState extends State<SecondScreen> {
         children: [
           const Text(
             'By default this region is the original widget - nothing wrapped, '
-            'nothing rasterised - and iOS only keeps it out of captures while the '
+            'nothing rasterised - and it is only kept out of captures while the '
             'screen is recorded or mirrored, or while the app is in the background '
             '(which also keeps it out of the app-switcher snapshot).',
           ),
           const SizedBox(height: 8),
-          SwitchListTile(
-            title: const Text('Always keep the region out of captures'),
-            subtitle: const Text(
-              'On: also blanks foreground screenshots, by showing a live copy of '
-              'the subtree instead of the subtree itself',
-            ),
-            value: _alwaysProtect,
-            onChanged: (value) => setState(() => _alwaysProtect = value),
+          SegmentedButton<SensitiveProtection>(
+            segments: const <ButtonSegment<SensitiveProtection>>[
+              ButtonSegment<SensitiveProtection>(
+                value: SensitiveProtection.whileRecording,
+                label: Text('Recording only'),
+              ),
+              ButtonSegment<SensitiveProtection>(
+                value: SensitiveProtection.whileCaptured,
+                label: Text('+ background'),
+              ),
+              ButtonSegment<SensitiveProtection>(
+                value: SensitiveProtection.always,
+                label: Text('Always'),
+              ),
+            ],
+            selected: <SensitiveProtection>{_protection},
+            onSelectionChanged: (Set<SensitiveProtection> selection) =>
+                setState(() => _protection = selection.first),
           ),
+          const SizedBox(height: 8),
+          Text(switch (_protection) {
+            SensitiveProtection.whileRecording =>
+              'Recording only: the app switcher and foreground screenshots are '
+                  'not covered.',
+            SensitiveProtection.whileCaptured =>
+              'Recording plus background: also keeps the region out of the '
+                  'app-switcher snapshot.',
+            SensitiveProtection.always =>
+              'Always: foreground screenshots are blanked too, at the cost of '
+                  'always showing a live copy of the subtree.',
+          }),
           const Text('Ordinary content (captured normally):'),
           const SizedBox(height: 8),
           Container(
@@ -264,9 +286,7 @@ class _SecondScreenState extends State<SecondScreen> {
           const Text('Sensitive region:'),
           const SizedBox(height: 8),
           ScreenshotShieldSensitiveView(
-            protection: _alwaysProtect
-                ? SensitiveProtection.always
-                : SensitiveProtection.whileCaptured,
+            protection: _protection,
             // What a capture shows, and what the user sees behind the copy.
             captureColor: Colors.black,
             child: Container(
