@@ -1,331 +1,388 @@
 # screenshot_shield
 
-Detects user screenshots and screen recording, and optionally prevents screen
-capture, on Android and iOS.
+[![pub package](https://img.shields.io/pub/v/screenshot_shield.svg)](https://pub.dev/packages/screenshot_shield)
+[![pub points](https://img.shields.io/pub/points/screenshot_shield)](https://pub.dev/packages/screenshot_shield/score)
+[![CI](https://github.com/josh4500/screenshot_guard/actions/workflows/ci.yml/badge.svg)](https://github.com/josh4500/screenshot_guard/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Platform behaviour
+Protect sensitive screens in your Flutter app. `screenshot_shield` detects screenshots
+and screen recording, blanks screen captures of a whole screen or of a single sensitive
+region, and hides your app's content in the app switcher.
 
-Screenshot and screen-recording detection are best-effort and
-platform-specific:
+- **Prevent capture** - screenshots and screen recordings come out blank (Android, iOS,
+  Windows), and so does the app-switcher snapshot (Android, iOS). On Android, blanking
+  and screenshot detection exclude each other, so the guards detect by default there
+  ([details](#guarding-a-screen)).
+- **Detect screenshots** - get a callback, plus a PNG of the guarded screen to share
+  instead of the blanked frame (Android, iOS).
+- **Detect screen recording and mirroring** - a stream and a getter you can react to
+  (Android 15+, iOS; best-effort on desktop).
+- **Protect one region** - keep a card number or a balance out of recordings while the
+  rest of the screen stays capturable (iOS).
+- **App-switcher privacy** - hide the app's content when it goes to the background.
+- **Route-aware guards** - protection turns on while a screen is visible and off when it
+  isn't, and several guards can be active at once.
 
-| Capability | Android | iOS |
-|---|---|---|
-| Screenshot detection | Yes - Android 14+ uses the system `DETECT_SCREEN_CAPTURE` API; older versions watch the media store and report shortly after a screenshot is saved | Yes - reports immediately via the `UIApplicationUserDidTakeScreenshotNotification` system notification |
-| Screen-recording detection (`onScreenRecordingChanged`) | Yes - Android 15+ (API 35) reports whether the app's activities are visible in a screen recording via `DETECT_SCREEN_RECORDING`; older versions never emit | Yes - reflects `UIScreen.isCaptured`, which is also `true` while the screen is mirrored (for example via AirPlay); the simulator always reports not recording |
-| Prevent screen capture (`setProtection(preventCapture: true)`) | Yes - adds the secure window flag so the captured frame is blank | Yes - the app's content layer is nested inside a secure text field's capture-excluded layer, so screenshots come out blank (undocumented UIKit behaviour, see [iOS configuration](#ios-configuration)) |
-| Region protection (`ScreenshotShieldSensitiveView`) | No | Yes - one region at a time is kept out of captures by hosting a Flutter-rendered copy of it in a native view whose layer is nested in a capture-excluded canvas (undocumented UIKit behaviour); by default only while the screen is recorded/mirrored or the app is backgrounded, and permanently with `protection: always` |
-| Screenshot events while protected | No - the secure window flag blanks the frame (it is never saved, so the media-store observer never fires) and, on Android 14+, the system withholds the capture callback for secure windows. The guards resolve this by dropping prevention when detection is also requested, so the event fires and the guarded screen is re-rasterized into a shareable image | Yes - the detection notification still fires, and the guarded screen can still be re-rasterized into a shareable image |
-| Runtime permission | `DETECT_SCREEN_CAPTURE` (auto-granted, Android 14+ only) and `DETECT_SCREEN_RECORDING` (auto-granted, Android 15+ only); on Android 9 (API 28) and below, screenshot detection reads the media store and needs `READ_EXTERNAL_STORAGE`, which the host app must request at runtime | Not required |
+## Platform support
 
-On Android, `preventCapture` (the secure window flag) and screenshot detection
-are mutually exclusive: the blanked frame is never saved and the system withholds
-the capture callback for secure windows, so no event fires while prevention is
-on. The guards handle this automatically by dropping prevention when
-`detectScreenshots` is also enabled on Android. To keep the blanked frame
-instead, set `forcePreventCapture: true` on the guard (accepting that
-`onScreenshotDetected` will not fire). On Android 14+, the system shows a notice
-whenever the screenshot detection API fires. Screenshots taken via ADB or
-instrumentation tests are not detected by either path.
+| Feature | Android | iOS | Windows | Linux |
+|---|:-:|:-:|:-:|:-:|
+| Prevent capture (`preventCapture`) | ✅ | ✅¹ | ✅ | ❌ |
+| Screenshot detection | ✅² | ✅ | ❌ | ❌ |
+| Screen-recording detection | ✅ 15+ | ✅ | ⚠️³ | ⚠️³ |
+| Region protection (`ScreenshotShieldSensitiveView`) | ❌ | ✅¹ | ❌ | ❌ |
+| App-switcher privacy (`backgroundBlur`) | ✅ | ✅ | ✅ | ❌ |
+| Keyboard protection | ❌ | ✅¹ | ❌ | ❌ |
 
-### Desktop (Windows, Linux)
+¹ Relies on undocumented UIKit behaviour - verify on the iOS versions you support (see
+[iOS](#ios)).
+² Android 14+ uses the system API. Android 10-13 needs a media permission granted by the
+host app (see [Android](#android)).
+³ A heuristic that looks for known recorder programs; see [Windows and Linux](#windows-and-linux).
 
-The package registers on Windows and Linux so the widget layer works there,
-but desktop has no OS screenshot-detection or screenshot-prevention APIs, so
-`onScreenshotDetected` never fires, `startListening` is a no-op for
-screenshots, and `preventCapture` cannot blank the capture. Screen-recording
-detection is available as a best-effort heuristic: while `startListening` is
-active the running process list is sampled every two seconds and
-`onScreenRecordingChanged` emits `true` when a well-known screen recorder (for
-example OBS, Bandicam, Camtasia, Kazam, Kooha, `wf-recorder`) is found. This is
-intentionally conservative but still unreliable - a recorder that is open but
-idle is reported as recording, and an unlisted or sandboxed recorder is missed.
-What does apply:
+## Install
 
-- On **Windows**, enabling `setProtection(backgroundBlur: true)` cloaks the
-  window when it is deactivated or minimized, hiding it from alt-tab and the
-  taskbar preview.
-- On **Linux**, detection and protection are unavailable (no standard
-  mechanism); the Dart widgets still work.
+```sh
+flutter pub add screenshot_shield
+```
 
-## Usage
+No configuration is needed for the defaults. Read [Android](#android) if you want
+screenshot detection on Android 10-13.
 
-Provide a `ScreenshotShield` to the tree with `ScreenshotShieldScope`, then
-wrap the screen you want to guard with a `ScreenshotShieldRouteGuard`. The
-guard observes the route it lives on: protection and screenshot listening are
-enabled while the route is in view and released automatically when another
-route covers it.
+## Quick start
+
+Provide a `ScreenshotShield` with `ScreenshotShieldScope`, register its route observer
+with your app, and wrap a sensitive screen in a `ScreenshotShieldRouteGuard`:
 
 ```dart
-final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+final routeObserver = RouteObserver<ModalRoute<void>>();
 
-// Wrap your app with the scope and register the observer with the navigator:
-ScreenshotShieldScope(
-  shield: ScreenshotShield(),
-  routeObserver: routeObserver,
-  child: MaterialApp(
-    navigatorObservers: [routeObserver],
-    home: const HomeScreen(),
-  ),
-);
+void main() {
+  runApp(
+    ScreenshotShieldScope(
+      shield: ScreenshotShield(),
+      routeObserver: routeObserver,
+      child: MaterialApp(
+        navigatorObservers: [routeObserver],
+        home: const PaymentScreen(),
+      ),
+    ),
+  );
+}
 
-// Inside a guarded screen:
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+class PaymentScreen extends StatelessWidget {
+  const PaymentScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return ScreenshotShieldRouteGuard(
       onScreenshotDetected: (image) {
         // `image` is a PNG of the guarded screen (null if capture failed).
-        // Present it to the user, e.g. via `share_plus`.
+        // Show it to the user or share it, e.g. with `share_plus`.
       },
-      child: const Scaffold(
-        body: Center(child: Text('Guarded')),
-      ),
+      child: const Scaffold(body: Center(child: Text('Card number: 1234'))),
     );
   }
 }
 ```
 
-The guard reads its `ScreenshotShield` from the nearest `ScreenshotShieldScope`
-with `ScreenshotShieldScope.of(context)`. Configure the guard with a
-`preventCapture` flag (Android only, default `true`), a `detectScreenshots`
-flag (default `true`), a `forcePreventCapture` flag (default `false`) that
-makes blanking win over detection on Android, a `captureOnScreenshot` flag
-(default `true`), and an optional `onScreenshotDetected` callback. With
-`captureOnScreenshot` the guarded subtree is re-rasterized into a PNG on each
-screenshot, so the app can show exactly what was on screen even when the OS
-frame is blanked or unavailable.
+While `PaymentScreen` is visible, captures of it come out blank and screenshots are
+reported on iOS. On Android a blanked screen cannot report screenshots, so by default the
+guard reports them and does not blank; pass `forcePreventCapture: true` to blank the
+screen there instead (see [Guarding a screen](#guarding-a-screen)). When another route
+covers it, protection and listening are released.
 
-For screens that are not managed by a `Navigator` (custom tabs, embedded
-views, overlays), use `ScreenshotShieldGuard` instead of the route guard. It
-provides the same flags and callback but activates while the widget is mounted
-and its `active` flag is `true`, without needing a `RouteObserver`.
+## Usage
+
+### Guarding a screen
+
+`ScreenshotShieldRouteGuard` follows the route it lives on. For content that is not a
+route (tabs, overlays, embedded views) use `ScreenshotShieldGuard`, which is active while
+it is mounted and its `active` flag is `true`:
+
+```dart
+ScreenshotShieldGuard(
+  active: showBalance,
+  child: BalanceCard(balance: balance),
+)
+```
+
+Both guards take the same options:
+
+| Option | Default | Effect |
+|---|---|---|
+| `preventCapture` | `true` | Blank captures while the guard is active. |
+| `detectScreenshots` | `true` | Listen for screenshots while active. |
+| `forcePreventCapture` | `false` | On Android, keep prevention even when detection is on (see below). |
+| `captureOnScreenshot` | `true` | Re-rasterize the guarded subtree into a PNG on each screenshot. |
+| `onScreenshotDetected` | - | Called with that PNG (or `null`). |
+
+Guards count their requests: with two guards on screen, protection stays on until the
+last one that needs it goes away.
+
+**Android:** the secure window flag that blanks captures also stops screenshots from
+being saved, so no screenshot event can fire while it is on. When a guard asks for both,
+detection wins and prevention is dropped on Android; set `forcePreventCapture: true` to
+keep the blanked frame instead (and accept that `onScreenshotDetected` will not fire).
+On iOS and Windows the two work together.
 
 ### Detect-and-notify mode
 
-By default `preventCapture` blanks the captured frame on Android and iOS, so the
-user sees a black screenshot. To follow a Snapchat-style flow instead - let the
-screenshot succeed and react in `onScreenshotDetected` (for example by sending
-the captured image or notifying a peer) - set `preventCapture: false`.
+To let screenshots succeed and react to them instead - a Snapchat-style "they took a
+screenshot" flow - turn prevention off:
 
-### Which protection for which situation
+```dart
+ScreenshotShieldRouteGuard(
+  preventCapture: false,
+  onScreenshotDetected: (image) => notifyPeer(image),
+  child: const ChatScreen(),
+)
+```
 
-| Mechanism | Covers | Granularity | What the user sees |
-|---|---|---|---|
-| `setProtection(preventCapture: true)` / `ScreenshotShieldRouteGuard` | screenshots, screen recordings, app-switcher snapshot | the whole window | the app itself, untouched |
-| `ScreenshotShieldSensitiveView` (`whileRecording`) | screen recordings and mirroring | one subtree, **iOS only** | the original widget, untouched |
-| `ScreenshotShieldSensitiveView` (`whileCaptured`, the default) | screen recordings and mirroring, app-switcher snapshot | one subtree, **iOS only** | the original widget, untouched |
-| `ScreenshotShieldSensitiveView(protection: always)` | the above plus foreground screenshots | one subtree, **iOS only** | a continuously refreshed copy of the subtree |
+### Protecting one region (iOS)
 
-Use a guard when a whole screen must be blank in a capture, and a sensitive view
-when one part of the screen must be blank while the rest stays capturable.
-
-**Why a foreground screenshot cannot be blanked per region:** iOS excludes a
-*native view's own layer* from captures, and Flutter renders every widget into one
-surface (`PlatformViewLayer` is the only composited native view; pictures,
-textures and filters all land in the same Flutter drawable). Nesting live Flutter
-content in the excluded layer is therefore impossible, and an excluded layer is
-*omitted* from the capture rather than replaced by black - so a "shield" that is
-transparent on screen would simply reveal the live widget to the capture as well.
-The only way to blank a region in a screenshot is to display something native in
-it: a rasterised copy, which is what `protection: always` does.
-
-### Region protection (iOS)
+`ScreenshotShieldSensitiveView` keeps one part of the screen out of captures while the
+rest stays capturable:
 
 ```dart
 ScreenshotShieldSensitiveView(
   // What a capture shows where the region is. Defaults to black.
   captureColor: Colors.black,
-  // What the user sees behind the copy, where the child is transparent
-  // (the gaps between rounded cells, for example).
-  backdropColor: Theme.of(context).scaffoldBackgroundColor,
-  child: Text('Account number: 1234'),
+  // Only needed when the child has see-through parts (rounded corners, gaps):
+  // the colour behind the region. Defaults to transparent.
+  backdropColor: Theme.of(context).colorScheme.surface,
+  child: const BalanceCard(),
 )
 ```
 
-By default the widget is effectively not there: it wraps `child` in a
-layout-neutral box that paints nothing, creates no platform view and rasterises
-nothing, and the original widget is what is laid out, painted and interactive. It
-takes over only while protection is needed:
+To show captures something other than a solid colour - a shape matching the content, a
+message, or a blur of the content - pass a `capturePlaceholder`. It is sized to the region
+and drawn beneath the copy, so only screenshots and recordings see it:
 
-- while the screen is being recorded or mirrored
-  (`ScreenshotShield.onScreenRecordingChanged`, i.e. `UIScreen.isCaptured` on iOS -
-  also `true` while mirroring, such as AirPlay - and the Android 15 callback). The
-  current state is also available as `ScreenshotShield.isScreenRecording`, which is
-  what lets a region that appears during a recording engage immediately instead of
-  waiting for the next change, and
-- while the app is not in the foreground, which is what keeps the region out of the
-  app-switcher snapshot (set `protection: SensitiveProtection.whileRecording` to drop
-  this case and protect recordings only).
+```dart
+ScreenshotShieldSensitiveView(
+  backdropColor: Theme.of(context).colorScheme.surface,
+  // A rounded box with a lock, matching a rounded card.
+  capturePlaceholder: DecoratedBox(
+    decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(16)),
+    child: const Center(child: Icon(Icons.lock, color: Colors.white70)),
+  ),
+  child: const BalanceCard(),
+)
 
-While it is engaged, the subtree stays live and interactive - taps, drags, focus and
-text input reach `child` as usual - and a platform view whose layer is nested in its
-own capture-excluded canvas covers it. The user sees the subtree as a copy that is
-refreshed **whenever the subtree repaints**, at most once per frame, so typing, a
-blinking caret, animations and size changes all track; a capture gets no pixels from
-the region and instead shows `captureColor`. Nothing is painted over the region
-before the first copy lands, so it shows the live subtree and is simply not excluded
-from captures yet. `ScreenshotShieldSensitiveViewController.refresh()` refreshes on
-demand.
+// Or a blur of the content (captures see a blurred version of it):
+capturePlaceholder: ClipRRect(
+  borderRadius: BorderRadius.circular(16),
+  child: BackdropFilter(
+    filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+    child: const ColoredBox(color: Color(0x33000000)),
+  ),
+),
+```
 
-`captureColor` (black by default) is painted in Flutter behind the excluded canvas,
-which is why the user never sees it. `backdropColor` (the ambient scaffold
-background by default) is painted *inside* the canvas behind the copy, so the
-transparent parts of the child look right on screen while a capture still sees
-`captureColor`.
+Anything the placeholder leaves uncovered or translucent shows the live content to
+captures, so keep it opaque over sensitive content unless a blur is what you want.
 
-`protection: SensitiveProtection.always` keeps the region engaged permanently, in
-exchange for also blanking foreground screenshots. While it is on, these costs
-apply; with the default they only apply while a capture is happening:
+| `protection` | Covers | Cost |
+|---|---|---|
+| `SensitiveProtection.whileRecording` | screen recordings and mirroring | none while not recording |
+| `SensitiveProtection.whileCaptured` (default) | the above, plus the app-switcher snapshot | none while not captured |
+| `SensitiveProtection.always` | the above, plus foreground screenshots | continuous, see below |
 
-- The region is a native view, so it composites above the Flutter content: a
-  Flutter overlay that covers the region (a selection toolbar, a dialog, a tooltip)
-  draws behind it.
-- Rasterising costs a GPU readback per refresh, so a region containing something
-  that repaints continuously (video, a large animation) keeps the CPU busy. Cap it
-  with `refreshInterval`, or use whole-window protection for content like that.
+By default the widget is effectively not there: it lays out and paints `child`
+unchanged, creates no platform view and rasterises nothing. It takes over only while the
+screen is recorded or mirrored (`ScreenshotShield.isScreenRecording`) or the app is in the
+background. While engaged, the subtree stays live and interactive - taps, focus and text
+input reach `child` - and a native view nested in a capture-excluded canvas shows a copy
+of it that refreshes when the subtree repaints, about 30 times a second by default
+(`refreshInterval`; `Duration.zero` refreshes on every frame). A capture sees
+`captureColor` instead. Content that repaints inside its own repaint boundary - a text
+field's caret and selection, a scrolling list - does not trigger a refresh; call
+`ScreenshotShieldSensitiveViewController.refresh()` when it changes.
+
+iOS reports a recording slightly after it starts, and the first copy takes a frame or two
+to land, so the first moments of a recording can include the region, and the region can
+flash briefly on screen as it engages. Use `protection: SensitiveProtection.always` for
+content that must never appear (the copy is then already in place when a recording
+starts), at the cost below.
+
+`protection: SensitiveProtection.always` keeps the region engaged permanently, which also
+blanks foreground screenshots, at these costs:
+
+- The region is a native view, so it composites above Flutter content: a Flutter overlay
+  that covers the region (a dialog, a tooltip, a selection toolbar) draws behind it.
+- Each refresh is a GPU readback, so continuously repainting content (video, large
+  animations) keeps the CPU busy. Cap it with `refreshInterval`, or use a guard instead.
 - The copy is one frame behind.
 
-Layout is deliberately neutral: the region lays the subtree out with the constraints
-it received, unchanged, sizes itself from the subtree, sizes the overlay to match it
-exactly, clips nothing, and only the subtree is a pointer target or contributes
-semantics. Wrapping a widget in it does not change how that widget lays out.
+Region protection stands down while whole-window prevention is active.
 
-It is iOS only, stands down while whole-window prevention is active (no platform
-view is created and nothing is rasterised), and derives from the same undocumented
-UIKit behaviour as the whole-window protection, so verify it on a real device.
-`xcrun simctl io screenshot` cannot show capture exclusion at all.
+<details>
+<summary>Why a foreground screenshot cannot be blanked per region without a copy</summary>
 
-Note that Flutter's own `SensitiveContent` widget is *not* an alternative here:
-any `SensitiveContent(sensitive:)` in the tree obscures the **entire screen**
-during media projection, and only on Android 15+.
+iOS excludes a *native view's own layer* from captures, and Flutter renders every widget
+into one surface (`PlatformViewLayer` is the only composited native view). Nesting live
+Flutter content in the excluded layer is therefore impossible, and an excluded layer is
+*omitted* from the capture rather than replaced by black - so a shield that is
+transparent on screen would reveal the live widget to the capture as well. The only way
+to blank a region in a screenshot is to display something native in it: a rasterised
+copy, which is what `protection: always` does.
 
-### Background privacy
+Flutter's own `SensitiveContent` widget is not an alternative: it obscures the **entire
+screen** during media projection, and only on Android 15+.
 
-Screenshot detection only runs while the app is in the foreground, so a user
-in the background or the app switcher can take screenshots freely. To hide the
-app's content in the app switcher, enable the native background blur:
+</details>
 
-```dart
-final shield = ScreenshotShield();
-await shield.setProtection(backgroundBlur: true);
-```
-
-On iOS the key window is covered with a `UIVisualEffectView` blur when the app
-enters the background. On Android 12+ the window is blurred with
-`RenderEffect`; on older Android versions a dim overlay is shown because no
-public blur API exists. The feature is disabled by default.
-
-Note that if `preventCapture` (`FLAG_SECURE`) is also enabled, the app-switcher
-snapshot stays blank and wins over the blur.
-
-For lower-level control you can drive `ScreenshotShield` directly:
+### App-switcher privacy
 
 ```dart
-final shield = ScreenshotShield();
-shield.onScreenshotDetected.listen((_) {
-  // Show your own shareable image here.
-});
-
-// While this screen is visible:
-await shield.startListening();
-await shield.setProtection(preventCapture: true); // Blanks the captured frame.
-
-// When leaving the screen:
-await shield.stopListening();
+await ScreenshotShield().setProtection(backgroundBlur: true);
 ```
 
-When a screenshot is detected, present the user with your own shareable image
-(e.g. via `share_plus`) instead of the captured frame. Note that on Android
-`preventCapture` and screenshot detection cannot both be enabled: the secure
-window flag blanks the frame (never saved) and the system withholds the
-capture callback for secure windows, so no event fires while prevention is on.
-To get detection events on Android, keep `preventCapture` disabled; to blank
-the frame, accept that no events will fire. On iOS the screenshot is blanked
-and the detection event still fires, and the guarded screen can be
-re-rasterized into a shareable image.
+| Platform | What the app switcher shows |
+|---|---|
+| Android 13+ | No thumbnail of the app (`setRecentsScreenshotEnabled(false)`); screenshots and their detection are unaffected. |
+| Android 12 and below | The content blurred (with `RenderMode.texture`) or covered. |
+| iOS | The content blurred. The blur also appears while the app is inactive, e.g. under Control Center or a system alert. |
+| Windows | The app icon instead of a live preview in the taskbar thumbnail and Alt+Tab. |
+
+While `preventCapture` is on, the app-switcher snapshot is blank anyway.
 
 ### Screen-recording detection
-
-While `startListening` is active you can observe whether the app is currently
-visible in a screen recording:
 
 ```dart
 final shield = ScreenshotShield();
 shield.onScreenRecordingChanged.listen((isRecording) {
-  if (isRecording) {
-    // The app is being recorded.
-  }
+  // Hide sensitive content, pause playback, ...
 });
-
 await shield.startListening();
+
+// Or read the current state at any time:
+if (shield.isScreenRecording) { /* ... */ }
 ```
 
-The stream emits the current state when it is first listened to and then on
-every change. Support is platform-specific: iOS reports `UIScreen.isCaptured`
-(which is also `true` while the screen is mirrored, for example via AirPlay),
-Android reports recording visibility on Android 15 (API 35) and newer, and
-Windows and Linux use a best-effort process-name heuristic (see below). Screen
-recording does not affect `onScreenshotDetected`.
+The stream emits the current state when listening starts and then every change. iOS
+reports recording, mirroring (AirPlay) and screen sharing for the app's scene; Android
+15+ reports whether the app is visible in a recording.
 
-## iOS configuration
+### Keyboard protection (iOS)
 
-The iOS implementation observes `UIApplicationUserDidTakeScreenshotNotification`
-and requires no permissions or `Info.plist` entries. Screenshot detection fires
-while the app is in the foreground; screenshots taken while the app is
-backgrounded (e.g. from the app switcher) are not reported.
+The on-screen keyboard is a window of its own, so neither whole-window protection nor a
+region covers it - a capture with the keyboard up shows the keys.
 
-Screen-recording detection observes `UIScreen.capturedDidChangeNotification`
-and reads `UIScreen.isCaptured`, so it also reports screen mirroring (for
-example AirPlay). The simulator always reports `isCaptured == true`, so it is
-treated as not recording.
+```dart
+await ScreenshotShield().setKeyboardProtection(enabled: true);
+```
 
-### How `preventCapture` works on iOS
+On iOS this nests the keyboard window's content in the same capture-excluded canvas, so
+captures get no keyboard pixels (undocumented UIKit behaviour: verify it on the iOS
+versions you support). On Android the keyboard belongs to another app and cannot be
+excluded; keep sensitive input inside your app instead (an in-app keypad is ordinary
+Flutter content the guards cover), or hide the keyboard while
+`onScreenRecordingChanged` is `true`.
 
-iOS has no public API for blocking screenshots. The implementation relies on a
-`UITextField` with `isSecureTextEntry` set to `true`: UIKit renders such a field
-through a private, capture-excluded canvas layer. That layer only protects its
-own content, so the app's content layer is nested inside it. Merely adding the
-secure field next to the app content - as this package did before 0.1.5 -
-protects nothing but the empty field itself, which is why screenshots stayed
-visible.
+### Low-level API
 
-The field is sized to the window and inserted at the window's origin so the
-canvas layer's coordinate space matches the window's; the content layer keeps
-its frame across the move. While protection is enabled the guarded screen comes
-out blank in screenshots, screen recordings and the app-switcher snapshot, and
-`onScreenshotDetected` still fires so the guarded screen can be re-rasterized
-into a shareable image.
+The guards are built on `ScreenshotShield`, which you can drive directly:
 
-This depends on undocumented UIKit behaviour, so a future iOS release can break
-it, and it may be judged risky in App Store review. Verify it on every iOS
-version you support, and keep `preventCapture: false` (detect-and-notify mode)
-as the fallback: [`captureOnScreenshot`](#detect-and-notify-mode) still hands
-you a PNG of the guarded screen even when the OS frame is not blanked.
+```dart
+final shield = ScreenshotShield();
+shield.onScreenshotDetected.listen((_) => showShareSheet());
 
-Note that `xcrun simctl io screenshot` (and any tool that reads the simulator
-framebuffer directly) is never masked - it will show the app even when
-protection is working, so it cannot be used to test this. Check on a device, or
-with the simulator's own screenshot service
-(`Device > Trigger Screenshot`).
+await shield.startListening();                    // calls are counted
+await shield.setProtection(preventCapture: true); // sets the window state directly
 
-## Example app
+// Later:
+await shield.setProtection(preventCapture: false);
+await shield.stopListening();
+```
 
-A runnable example lives in `example/`. It demonstrates detection, the
-captured-image callback, and the background blur, with toggles for each
-feature:
+`setProtection` sets the window's state directly, so prefer the guards when more than
+one part of the app needs protection.
+
+## Platform notes
+
+### Android
+
+| Android | Screenshot detection | Permission |
+|---|---|---|
+| 14+ (API 34) | System `ScreenCaptureCallback`, immediate | `DETECT_SCREEN_CAPTURE` (normal, declared by the plugin) |
+| 10-13 (API 29-33) | Media store observer, shortly after the image is saved | `READ_EXTERNAL_STORAGE` (10-12) or `READ_MEDIA_IMAGES` (13) - declare (see below) and request it in your app |
+| 7-9 (API 24-28) | Media store observer | `READ_EXTERNAL_STORAGE` - declared by the plugin, request it at runtime |
+
+Without the media permission on Android 10-13, the screenshot (owned by System UI) is
+invisible to your app and no event fires. Only request it if detection on those versions
+matters to you: Google Play asks apps to justify photo permissions. The plugin declares
+`READ_EXTERNAL_STORAGE` only up to Android 9, and the manifest merger applies that limit to
+your declaration too, so override it explicitly:
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+      android:maxSdkVersion="32" tools:replace="android:maxSdkVersion" />
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+</manifest>
+```
+
+On Android 14+ the system shows a notice when an app detects a screenshot. Screenshots
+taken through ADB are not reported. Screen-recording detection needs Android 15 (API 35,
+`DETECT_SCREEN_RECORDING`).
+
+The plugin's manifest merges `DETECT_SCREEN_CAPTURE`, `DETECT_SCREEN_RECORDING` and
+`READ_EXTERNAL_STORAGE` (up to API 28) into your app. To drop one, add it to your app's
+`AndroidManifest.xml` with `tools:node="remove"` (declare
+`xmlns:tools="http://schemas.android.com/tools"` on the `<manifest>` element):
+
+```xml
+<uses-permission android:name="android.permission.DETECT_SCREEN_RECORDING" tools:node="remove" />
+```
+
+Debug logs are off by default; enable them with
+`adb shell setprop log.tag.ScreenshotShield DEBUG`.
+
+### iOS
+
+iOS has no public API for blocking screenshots. `preventCapture` relies on a
+`UITextField` with `isSecureTextEntry`: UIKit renders such a field through a private
+capture-excluded canvas layer, and the plugin nests the app's content layer inside it, so
+screenshots, recordings and the app-switcher snapshot come out blank while
+`onScreenshotDetected` still fires.
+
+- Protection is re-applied automatically when UIKit rebuilds the view hierarchy (for
+  example after a full-screen modal is dismissed) and when the app becomes active.
+- Native modals and alerts presented over the app are separate views and are not covered.
+- Because it depends on undocumented behaviour, a future iOS release can break it, and it
+  may draw questions in App Store review. Verify it on every iOS version you support, and
+  keep detect-and-notify mode as a fallback.
+- Test on a device or with the simulator's **Device > Trigger Screenshot**:
+  `xcrun simctl io screenshot` reads the framebuffer directly and is never masked. The
+  simulator never reports a recording.
+
+No permissions or `Info.plist` entries are needed. The plugin ships a privacy manifest.
+
+### Windows and Linux
+
+- **Windows:** `preventCapture` uses `SetWindowDisplayAffinity`: on Windows 10 2004+ the
+  window is left out of screenshots, recordings and screen sharing; older versions show
+  it black. Windows has no screenshot notification, so `onScreenshotDetected` never fires.
+- **Linux:** there is no standard mechanism for detection or prevention; the widgets still
+  work and the calls are accepted.
+- **Recording detection (both):** while listening, the process list is sampled every two
+  seconds and `onScreenRecordingChanged` is `true` while a known recorder (OBS, Bandicam,
+  Camtasia, Kazam, Kooha, `wf-recorder`, ...) is running. A recorder that is open but idle
+  counts as recording, and unlisted or sandboxed recorders (and GNOME's built-in one) are
+  missed.
+
+## Example
+
+A runnable example with a toggle for every feature lives in [`example/`](example):
 
 ```sh
 cd example
 flutter run
 ```
 
-## Install
+## License
 
-Add the dependency to your `pubspec.yaml`:
-
-```yaml
-dependencies:
-  screenshot_shield: ^0.1.0
-```
+MIT - see [LICENSE](LICENSE).

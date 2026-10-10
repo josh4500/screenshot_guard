@@ -4,8 +4,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:screenshot_shield/screenshot_shield_platform_interface.dart';
 import 'package:screenshot_shield/src/screenshot_shield_messages.dart' as messages;
 
-/// An implementation of [ScreenshotShieldPlatform] that uses Pigeon-generated
-/// message channels to talk to the host platform.
+/// A [ScreenshotShieldPlatform] that talks to the host over Pigeon channels.
 class PigeonScreenshotShield extends ScreenshotShieldPlatform {
   PigeonScreenshotShield({
     messages.ScreenshotShieldHostApi? hostApi,
@@ -19,13 +18,8 @@ class PigeonScreenshotShield extends ScreenshotShieldPlatform {
   final Stream<int> Function() _eventStream;
   final Stream<bool> Function() _screenRecordingStream;
 
-  /// Number of consumers that asked for listening.
-  ///
-  /// The host only has a single "listening" flag, so stopping on behalf of one
-  /// consumer would silently stop detection for every other one - which happens
-  /// as soon as two guarded routes, or a guarded route and a sensitive region,
-  /// are alive at the same time. Counting here, in the platform implementation
-  /// shared by every [ScreenshotShield], keeps them independent.
+  /// Number of consumers that asked for listening. The host has a single flag,
+  /// so a stop from one consumer would silently stop detection for the others.
   int _listeningCount = 0;
 
   StreamSubscription<bool>? _screenRecordingSubscription;
@@ -33,8 +27,7 @@ class PigeonScreenshotShield extends ScreenshotShieldPlatform {
   late final _events = _eventStream();
   late final _screenRecordingEvents = _screenRecordingStream();
 
-  /// Whether the host is currently observing, i.e. whether any consumer asked
-  /// for listening.
+  /// Whether any consumer currently asked for listening.
   @visibleForTesting
   bool get isListening => _listeningCount > 0;
 
@@ -48,12 +41,8 @@ class PigeonScreenshotShield extends ScreenshotShieldPlatform {
   Future<void> startListening() async {
     _listeningCount++;
     if (_listeningCount == 1) {
-      // Track the state here rather than in the constructor: subscribing to an
-      // event channel before the Flutter binding exists throws
-      // "Binding has not yet been initialized", and the channel is then never
-      // listened to at all - which silently starves [isScreenRecording] and every
-      // stream listener of events. The subscription is kept for the lifetime of
-      // this instance so the current state stays readable after listening stops.
+      // Subscribe on first listen, not in the constructor: without a binding the
+      // channel is never listened to. Kept after stopping to keep state readable.
       _screenRecordingSubscription ??= _screenRecordingEvents.listen(
         reportScreenRecordingState,
         onError: (Object _) {},
@@ -78,6 +67,15 @@ class PigeonScreenshotShield extends ScreenshotShieldPlatform {
 
   @override
   Future<void> setBackgroundBlur({required bool blurEnabled}) => _hostApi.setBackgroundBlur(blurEnabled);
+
+  @override
+  Future<void> setKeyboardProtection({required bool enabled}) async {
+    try {
+      await _hostApi.setKeyboardProtected(enabled);
+    } catch (_) {
+      // Best-effort: Android, desktop and older hosts do not implement this.
+    }
+  }
 
   @override
   Future<void> dispose() async {}

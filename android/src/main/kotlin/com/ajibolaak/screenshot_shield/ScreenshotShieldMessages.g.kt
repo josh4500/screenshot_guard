@@ -68,6 +68,11 @@ interface ScreenshotShieldHostApi {
   fun stopListening()
   fun setProtected(protected: Boolean)
   fun setBackgroundBlur(blurEnabled: Boolean)
+  /**
+   * iOS only: keeps the on-screen keyboard out of captures by nesting the
+   * keyboard window's content in a capture-excluded canvas. No-op elsewhere.
+   */
+  fun setKeyboardProtected(enabled: Boolean)
 
   companion object {
     /** The codec used by ScreenshotShieldHostApi. */
@@ -136,6 +141,24 @@ interface ScreenshotShieldHostApi {
             val blurEnabledArg = args[0] as Boolean
             val wrapped: List<Any?> = try {
               api.setBackgroundBlur(blurEnabledArg)
+              listOf(null)
+            } catch (exception: Throwable) {
+              ScreenshotShieldMessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setKeyboardProtected$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val enabledArg = args[0] as Boolean
+            val wrapped: List<Any?> = try {
+              api.setKeyboardProtected(enabledArg)
               listOf(null)
             } catch (exception: Throwable) {
               ScreenshotShieldMessagesPigeonUtils.wrapError(exception)

@@ -99,7 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
             SwitchListTile(
               title: const Text('Prevent capture'),
               subtitle: const Text(
-                'Blanks the captured frame (Android and iOS)',
+                'Blanks the captured frame (Android, iOS and Windows)',
               ),
               value: preventCapture,
               onChanged: (value) => setState(() => preventCapture = value),
@@ -112,7 +112,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             SwitchListTile(
               title: const Text('Background blur'),
-              subtitle: const Text('Blur the app in the app switcher'),
+              subtitle: const Text(
+                "Hide the app's content in the app switcher",
+              ),
               value: backgroundBlur,
               onChanged: (value) async {
                 setState(() => backgroundBlur = value);
@@ -206,6 +208,9 @@ class _SecondScreenState extends State<SecondScreen> {
   Timer? _ticker;
   int _seconds = 0;
   SensitiveProtection _protection = SensitiveProtection.whileCaptured;
+  bool _obscureKeyboard = false;
+  // `null` is the package default (about 30 refreshes a second).
+  Duration? _animationRefresh;
 
   @override
   void initState() {
@@ -228,6 +233,7 @@ class _SecondScreenState extends State<SecondScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final ScreenshotShield shield = ScreenshotShieldScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Region shielding')),
       body: ListView(
@@ -322,6 +328,100 @@ class _SecondScreenState extends State<SecondScreen> {
             ),
           ),
           const SizedBox(height: 24),
+          const _SectionLabel('Animating region'),
+          const Text(
+            'A region whose content never stops repainting. While it is engaged '
+            '(recording, or "Always" above), each refresh rasterises it and reads it '
+            'back from the GPU, so the refresh rate trades smoothness for cost. Record '
+            'the screen: the card must stay black in the recording at every rate.',
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<Duration?>(
+            segments: const <ButtonSegment<Duration?>>[
+              ButtonSegment<Duration?>(
+                value: Duration.zero,
+                label: Text('Every frame'),
+              ),
+              ButtonSegment<Duration?>(
+                value: null,
+                label: Text('30 fps (default)'),
+              ),
+              ButtonSegment<Duration?>(
+                value: Duration(milliseconds: 100),
+                label: Text('10 fps'),
+              ),
+            ],
+            selected: <Duration?>{_animationRefresh},
+            onSelectionChanged: (Set<Duration?> selection) =>
+                setState(() => _animationRefresh = selection.first),
+          ),
+          const SizedBox(height: 8),
+          ScreenshotShieldSensitiveView(
+            protection: _protection,
+            refreshInterval: _animationRefresh,
+            // The card has rounded corners: show the page colour behind them while
+            // the region is engaged.
+            backdropColor: Theme.of(context).colorScheme.surface,
+            // What screenshots and recordings show instead of the card: a rounded
+            // box with a lock, matching the card's shape.
+            capturePlaceholder: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock, color: Colors.white70),
+                    SizedBox(width: 8),
+                    Text('Hidden', style: TextStyle(color: Colors.white70)),
+                  ],
+                ),
+              ),
+            ),
+            child: const _AnimatedBalanceCard(),
+          ),
+          const SizedBox(height: 24),
+          const _SectionLabel('Keyboard'),
+          const Text(
+            'The keyboard is a separate system window, so neither a guarded screen '
+            'nor a region covers it by itself. Focus each field below and take a '
+            'screenshot: if the keyboard is missing for one of them, this platform '
+            'already hides it for secure input.',
+          ),
+          const SizedBox(height: 8),
+          const TextField(
+            decoration: InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Normal field',
+              helperText: 'Is the keyboard in the screenshot?',
+            ),
+          ),
+          const SizedBox(height: 12),
+          const TextField(
+            obscureText: true,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Secure field (obscureText)',
+              helperText: 'Is the keyboard in the screenshot?',
+            ),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('Obscure the keyboard in captures'),
+            subtitle: const Text(
+              'iOS only: keeps the keyboard usable on screen while captures get '
+              'none of its pixels. Android cannot do this - the keyboard belongs to '
+              'another app - so the call is a no-op there.',
+            ),
+            value: _obscureKeyboard,
+            onChanged: (bool value) {
+              setState(() => _obscureKeyboard = value);
+              shield.setKeyboardProtection(enabled: value);
+            },
+          ),
+          const SizedBox(height: 24),
           const Text(
             'Try it: the counter ticks and typing works. Start a screen recording '
             'from Control Center and this region comes out black in the recording '
@@ -333,6 +433,89 @@ class _SecondScreenState extends State<SecondScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A card that animates continuously: a sweeping gradient, a progress bar and a
+/// spinner, so the region repaints on every frame.
+class _AnimatedBalanceCard extends StatefulWidget {
+  const _AnimatedBalanceCard();
+
+  @override
+  State<_AnimatedBalanceCard> createState() => _AnimatedBalanceCardState();
+}
+
+class _AnimatedBalanceCardState extends State<_AnimatedBalanceCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (BuildContext context, Widget? child) {
+        final double t = _controller.value;
+        return Container(
+          height: 120,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment(-1 + 2 * t, -1),
+              end: Alignment(1 - 2 * t, 1),
+              colors: const <Color>[Colors.indigo, Colors.purple, Colors.pink],
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Balance',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    Text(
+                      '\u20a6 ${(1250000 + t * 1000).toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    LinearProgressIndicator(
+                      value: t,
+                      backgroundColor: Colors.white24,
+                      color: Colors.white,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Transform.rotate(
+                angle: t * 6.283185307179586,
+                child: const Icon(
+                  Icons.autorenew,
+                  color: Colors.white,
+                  size: 40,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

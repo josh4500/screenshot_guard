@@ -28,34 +28,25 @@ abstract class ScreenshotShieldPlatform extends PlatformInterface {
   /// Emits an event each time the user captures a screenshot.
   Stream<void> get onScreenshotDetected => throw UnsupportedError('onScreenshotDetected() has not been implemented.');
 
-  /// Emits the current screen-recording state whenever it changes.
+  /// Emits the screen-recording state whenever it changes.
   ///
-  /// The stream emits `true` when the app is visible in a screen recording and
-  /// `false` when it is no longer recorded. The current state is emitted as
-  /// soon as the stream is listened to. Detection depends on the platform:
-  /// on iOS it reflects `UIScreen.isCaptured` (recording or mirroring), and on
-  /// Android it requires Android 15 (API 35) or newer — older versions never
-  /// emit. Observation is tied to [startListening]/[stopListening].
+  /// The current state is emitted on first listen. iOS reports whether the app's scene is
+  /// recorded, mirrored or shared; Android needs API 35 and never emits below it. Observation
+  /// is tied to [startListening]/[stopListening].
   Stream<bool> get onScreenRecordingChanged =>
       throw UnsupportedError('onScreenRecordingChanged() has not been implemented.');
 
-  /// Whether the app is currently visible in a screen recording (or a mirrored
-  /// screen).
+  /// Whether the app is currently visible in a screen recording or mirrored screen.
   ///
-  /// [onScreenRecordingChanged] only delivers *changes*, so anything that starts
-  /// watching while a recording is already running has to read the current state
-  /// here: the stream will not replay the change it missed. It is `false` until
-  /// the platform has reported a state.
+  /// [onScreenRecordingChanged] only delivers changes, so anything that starts watching
+  /// mid-recording must read the state here. `false` until the platform reports one.
   bool get isScreenRecording => _screenRecordingActive;
 
   bool _screenRecordingActive = false;
 
-  /// Records the state the platform reported, which is what [isScreenRecording]
-  /// returns from then on.
+  /// Records the state the platform reported, which [isScreenRecording] then returns.
   ///
-  /// Platform implementations call this when an event arrives; the
-  /// implementations shipped with this package already do, and an implementation
-  /// that never calls it simply leaves [isScreenRecording] `false`.
+  /// Implementations that never call it leave [isScreenRecording] `false`.
   @protected
   void reportScreenRecordingState(bool screenRecordingActive) {
     _screenRecordingActive = screenRecordingActive;
@@ -67,13 +58,21 @@ abstract class ScreenshotShieldPlatform extends PlatformInterface {
   /// Stops observing for screenshots.
   Future<void> stopListening() => throw UnsupportedError('stopListening() has not been implemented.');
 
-  /// Prevents screen capture on Android. No-op on iOS.
+  /// Blanks screen captures of the app window while [protected] is `true`.
   Future<void> setProtected({required bool protected}) =>
       throw UnsupportedError('setProtected() has not been implemented.');
 
   /// Blurs the app content while the app is in the background.
   Future<void> setBackgroundBlur({required bool blurEnabled}) =>
       throw UnsupportedError('setBackgroundBlur() has not been implemented.');
+
+  /// iOS only: keeps the on-screen keyboard out of captures.
+  ///
+  /// The keyboard is a private system window, so it survives whole-window protection and
+  /// regions alike. iOS can nest it in a capture-excluded canvas, which is what this does;
+  /// platforms where the keyboard belongs to another app leave it as a no-op.
+  Future<void> setKeyboardProtection({required bool enabled}) =>
+      throw UnsupportedError('setKeyboardProtection() has not been implemented.');
 
   /// Releases the native resources held by the plugin.
   Future<void> dispose() => throw UnsupportedError('dispose() has not been implemented.');

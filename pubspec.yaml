@@ -1,8 +1,19 @@
 name: screenshot_shield
-description: Detect user screenshots and optionally prevent screen capture on Android and iOS.
-version: 0.1.10
+description: Detect screenshots and screen recording, blank screen captures of a whole screen or a sensitive region, and hide your app in the app switcher.
+version: 0.1.11
 repository: https://github.com/josh4500/screenshot_guard
-homepage: https://github.com/josh4500/screenshot_guard
+issue_tracker: https://github.com/josh4500/screenshot_guard/issues
+
+topics:
+  - screenshot
+  - screen-recording
+  - security
+  - privacy
+  - screen-capture
+
+screenshots:
+  - description: The example app guarding a screen, with capture prevention, screenshot detection and recording status.
+    path: doc/screenshots/android-demo.png
 
 environment:
   sdk: ">=3.12.2 <4.0.0"
@@ -29,7 +40,7 @@ flutter:
       ios:
         pluginClass: ScreenshotShieldPlugin
       windows:
-        pluginClass: ScreenshotShieldPlugin
+        pluginClass: ScreenshotShieldPluginCApi
       linux:
         pluginClass: ScreenshotShieldPlugin
 

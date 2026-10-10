@@ -5,23 +5,12 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
+import 'package:screenshot_shield/src/screenshot_shield_claims.dart';
 import 'package:screenshot_shield/src/screenshot_shield_guard_config.dart';
 
-/// A widget that guards its subtree against screen capture without relying on
-/// route navigation.
+/// Guards its subtree against screen capture while [active] is `true`.
 ///
-/// Unlike [ScreenshotShieldRouteGuard], which ties protection to the enclosing
-/// route being the top-most route, this guard activates while the widget is
-/// mounted and [active] is `true`. Use it for screens that are not managed by
-/// a `Navigator` with a [RouteObserver] (for example custom tabs, embedded
-/// views, or an overlay), and toggle [active] yourself when the screen is
-/// hidden by other means.
-///
-/// While active the guard starts listening for screenshots and (optionally)
-/// prevents capture; both are released when [active] becomes `false` or the
-/// widget is disposed.
-///
-/// The [ScreenshotShield] is read from the nearest [ScreenshotShieldScope].
+/// Unlike [ScreenshotShieldRouteGuard], it is not tied to a route.
 class ScreenshotShieldGuard extends StatefulWidget {
   const ScreenshotShieldGuard({
     super.key,
@@ -37,36 +26,29 @@ class ScreenshotShieldGuard extends StatefulWidget {
   /// The subtree guarded while the guard is active.
   final Widget child;
 
-  /// Whether the guard is currently active. When `false`, protection and
-  /// screenshot listening are released. Defaults to `true`.
+  /// Whether the guard is active. When `false`, protection and listening stop.
+  /// Defaults to `true`.
   final bool active;
 
-  /// Whether capture prevention is enabled while the guard is active. On
-  /// Android this blanks the captured frame via the secure window flag, but
-  /// that flag also suppresses screenshot detection, so on Android detection
-  /// wins when [detectScreenshots] is also enabled. Defaults to `true`.
+  /// Whether capture prevention is enabled while active. On Android the secure
+  /// flag also suppresses detection, so detection wins when [detectScreenshots]
+  /// is enabled too. Defaults to `true`.
   final bool preventCapture;
 
-  /// Whether the guard listens for screenshots while it is active.
-  /// Defaults to `true`.
+  /// Whether the guard listens for screenshots while active. Defaults to `true`.
   final bool detectScreenshots;
 
-  /// Whether capture prevention should win over screenshot detection on
-  /// Android when both are requested. On Android the secure window flag
-  /// suppresses detection, so forcing prevention means [onScreenshotDetected]
-  /// will not fire while the guard is active. Defaults to `false`.
+  /// Whether capture prevention wins over detection on Android. Forcing it
+  /// means [onScreenshotDetected] will not fire while the guard is active.
+  /// Defaults to `false`.
   final bool forcePreventCapture;
 
-  /// Whether the guarded subtree is re-rasterized into a PNG when a screenshot
-  /// is detected. The PNG bytes are passed to [onScreenshotDetected]; set to
-  /// `false` to skip the capture overhead. Defaults to `true`.
+  /// Whether the guarded subtree is re-rasterized into a PNG on detection, at
+  /// extra cost. The bytes go to [onScreenshotDetected]. Defaults to `true`.
   final bool captureOnScreenshot;
 
-  /// Invoked each time a screenshot is captured while the guard is active.
-  ///
-  /// The argument is a PNG-encoded image of the guarded subtree when
-  /// [captureOnScreenshot] is enabled, or `null` if the capture was skipped or
-  /// failed. Use it to show the user a shareable copy of the screen.
+  /// Called with a PNG of the guarded subtree, or `null` if capture was
+  /// skipped or failed. Fires each time a screenshot is captured.
   final ValueChanged<Uint8List?>? onScreenshotDetected;
 
   @override
@@ -77,10 +59,10 @@ class _ScreenshotShieldGuardState extends State<ScreenshotShieldGuard> {
   ScreenshotShield? _shield;
   StreamSubscription<void>? _screenshotSubscription;
   final GlobalKey _boundaryKey = GlobalKey();
+  final GuardClaims _claims = GuardClaims();
   bool _active = false;
 
-  /// Whether capture prevention should be applied, accounting for the Android
-  /// conflict where the secure window flag suppresses screenshot detection.
+  /// Whether prevention applies; see [preventCapture] for the Android conflict.
   bool get _shouldPrevent => shouldPreventCapture(
     preventCapture: widget.preventCapture,
     detectScreenshots: widget.detectScreenshots,
@@ -115,69 +97,19 @@ class _ScreenshotShieldGuardState extends State<ScreenshotShieldGuard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active != widget.active ||
         oldWidget.preventCapture != widget.preventCapture ||
-        oldWidget.detectScreenshots != widget.detectScreenshots) {
+        oldWidget.detectScreenshots != widget.detectScreenshots ||
+        oldWidget.forcePreventCapture != widget.forcePreventCapture) {
       unawaited(_syncActivation());
     }
   }
 
   Future<void> _syncActivation() async {
-    if (!mounted || _shield == null) {
+    final shield = _shield;
+    if (!mounted || shield == null) {
       return;
     }
-    if (widget.active) {
-      if (_active) {
-        await _resync();
-      } else {
-        await _enter();
-      }
-    } else if (_active) {
-      await _leave();
-    }
-  }
-
-  Future<void> _enter() async {
-    if (_active) {
-      return;
-    }
-    _active = true;
-    final shield = _shield!;
-    if (widget.detectScreenshots) {
-      await shield.startListening();
-    }
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: true);
-    }
-  }
-
-  Future<void> _leave() async {
-    if (!_active) {
-      return;
-    }
-    _active = false;
-    final shield = _shield!;
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: false);
-    }
-    if (widget.detectScreenshots) {
-      await shield.stopListening();
-    }
-  }
-
-  Future<void> _resync() async {
-    if (!_active) {
-      return;
-    }
-    final shield = _shield!;
-    if (widget.detectScreenshots) {
-      await shield.startListening();
-    } else {
-      await shield.stopListening();
-    }
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: true);
-    } else {
-      await shield.setProtection(preventCapture: false);
-    }
+    _active = widget.active;
+    await _claims.apply(shield, listen: _active && widget.detectScreenshots, protect: _active && _shouldPrevent);
   }
 
   Future<Uint8List?> _captureChild() async {
@@ -201,7 +133,8 @@ class _ScreenshotShieldGuardState extends State<ScreenshotShieldGuard> {
   @override
   void dispose() {
     _screenshotSubscription?.cancel();
-    unawaited(_leave());
+    _active = false;
+    unawaited(_claims.release());
     super.dispose();
   }
 

@@ -19,8 +19,7 @@ class _FakeShieldPlatform extends ScreenshotShieldPlatform {
   @override
   Future<void> startListening() async {
     calls.add('startListening');
-    // Mirror PigeonScreenshotShield: the cached state is tracked while listening,
-    // so a widget that mounts later can read the current value.
+    // Mirror PigeonScreenshotShield: cache the state so later widgets can read it.
     _subscription ??= recording.stream.listen(reportScreenRecordingState, onError: (Object _) {});
   }
 
@@ -32,8 +31,7 @@ class _FakeShieldPlatform extends ScreenshotShieldPlatform {
 }
 
 void main() {
-  // Capture prevention is process-wide state that mirrors the platform plugin,
-  // so every test starts from a known state.
+  // Prevention is process-wide, so each test starts from a known state.
   setUp(() async {
     await ScreenshotShield(platform: _FakeShieldPlatform()).setProtection(preventCapture: false);
   });
@@ -90,6 +88,8 @@ void main() {
     late List<MethodCall> viewCalls;
     late bool respondToSnapshots;
     late int createCalls;
+    // When set, setSnapshot replies wait for it, like a slow channel round trip.
+    Completer<void>? holdSnapshots;
 
     setUp(() {
       platform = _FakeShieldPlatform();
@@ -97,19 +97,22 @@ void main() {
       viewCalls = <MethodCall>[];
       respondToSnapshots = true;
       createCalls = 0;
+      holdSnapshots = null;
       final TestDefaultBinaryMessenger messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      // Kept installed for the whole test (including teardown): disposing the
-      // platform view talks to this channel too.
+      // Stays installed through teardown: disposal also talks to this channel.
       messenger.setMockMethodCallHandler(SystemChannels.platform_views, (MethodCall call) async {
         if (call.method == 'create') {
           createCalls++;
           final int viewId = (call.arguments as Map<Object?, Object?>)['id'] as int;
           if (respondToSnapshots) {
-            // The widget addresses its own platform view on a per-view channel.
             messenger.setMockMethodCallHandler(MethodChannel('screenshot_shield/sensitive_view/$viewId'), (
               MethodCall call,
             ) async {
               viewCalls.add(call);
+              final Completer<void>? hold = holdSnapshots;
+              if (call.method == 'setSnapshot' && hold != null) {
+                await hold.future;
+              }
               return null;
             });
           }
@@ -131,8 +134,7 @@ void main() {
       await tester.pump();
     }
 
-    /// Broadcast events are delivered in a microtask, which can land after the
-    /// frame `pump` started, so rebuild once more.
+    /// Broadcast delivery can land after the frame `pump` started, so pump twice.
     Future<void> emitRecording(WidgetTester tester, bool recording) async {
       platform.recording.add(recording);
       await tester.pump();
@@ -148,6 +150,7 @@ void main() {
       Duration? refreshInterval,
       Color? captureColor,
       Color? backdropColor,
+      Widget? capturePlaceholder,
     }) {
       return ScreenshotShieldScope(
         shield: shield,
@@ -160,6 +163,7 @@ void main() {
               refreshInterval: refreshInterval,
               captureColor: captureColor,
               backdropColor: backdropColor,
+              capturePlaceholder: capturePlaceholder,
               child: child ?? const SizedBox(width: 200, height: 80, child: Text('secret')),
             ),
           ),
@@ -188,10 +192,83 @@ void main() {
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('paints nothing over the subtree until a copy exists', (WidgetTester tester) async {
+      // Covering it would flash the region on screen when it engages.
       await tester.pumpWidget(region(protection: SensitiveProtection.always));
 
       expect(find.byType(UiKitView), findsOneWidget);
       expect(renderRegion(tester).captureColor, isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('shows the capture placeholder instead of the capture colour once a copy exists', (
+      WidgetTester tester,
+    ) async {
+      const placeholderKey = Key('placeholder');
+      var taps = 0;
+      await tester.pumpWidget(
+        region(
+          protection: SensitiveProtection.always,
+          child: GestureDetector(
+            onTap: () => taps++,
+            child: const SizedBox(width: 200, height: 80, child: Text('secret')),
+          ),
+          capturePlaceholder: const ColoredBox(key: placeholderKey, color: Color(0xFF00FF00), child: Text('hidden')),
+        ),
+      );
+      // Before the first copy nothing is painted over the live subtree.
+      expect(find.byKey(placeholderKey), findsNothing);
+
+      await settleSnapshot(tester);
+      expect(find.byKey(placeholderKey), findsOneWidget);
+      expect(renderRegion(tester).captureColor, isNull, reason: 'the placeholder replaces the solid colour');
+      // It fills the region exactly.
+      expect(tester.getSize(find.byKey(placeholderKey)), const Size(200, 80));
+      // Taps still reach the live subtree, and the placeholder adds no semantics.
+      await tester.tap(find.text('secret'));
+      expect(taps, 1);
+      expect(find.bySemanticsLabel('hidden'), findsNothing);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('a copy still in flight when the region disengages does not count for the next engagement', (
+      WidgetTester tester,
+    ) async {
+      const placeholderKey = Key('placeholder');
+      await tester.pumpWidget(
+        region(
+          child: const _Spinner(),
+          capturePlaceholder: const ColoredBox(key: placeholderKey, color: Color(0xFF000000)),
+        ),
+      );
+      await emitRecording(tester, true);
+      await settleSnapshot(tester);
+      expect(find.byKey(placeholderKey), findsOneWidget);
+
+      // The next copy's reply is held while the recording stops.
+      final hold = Completer<void>();
+      holdSnapshots = hold;
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await emitRecording(tester, false);
+      expect(find.byKey(placeholderKey), findsNothing);
+
+      // The stale reply lands, then the region engages again with a fresh native view.
+      holdSnapshots = null;
+      hold.complete();
+      await tester.pump();
+      platform.recording.add(true);
+      await tester.pump();
+      expect(find.byKey(placeholderKey), findsNothing, reason: 'no copy exists for the new view yet');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('keeps the same native view when the placeholder appears', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        region(
+          protection: SensitiveProtection.always,
+          capturePlaceholder: const ColoredBox(color: Color(0xFF000000)),
+        ),
+      );
+      final State<StatefulWidget> before = tester.state(find.byType(UiKitView));
+      await settleSnapshot(tester);
+      expect(identical(tester.state(find.byType(UiKitView)), before), isTrue);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('engages while the screen is being recorded', (WidgetTester tester) async {
@@ -209,12 +286,8 @@ void main() {
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('engages when it appears while the screen is already being recorded', (WidgetTester tester) async {
-      // The recording starts before this region exists, and the state event has
-      // already been delivered to whoever was listening: the stream will not
-      // replay it, so the region has to read the current state instead.
+      // The change event fired before this region existed and is not replayed.
       await tester.pumpWidget(const SizedBox());
-      // A guard on the previous screen was already listening when the recording
-      // started, so the change event has been and gone.
       await shield.startListening();
       await emitRecording(tester, true);
 
@@ -224,7 +297,6 @@ void main() {
       await settleSnapshot(tester);
       expect(renderRegion(tester).captureColor, isNotNull);
 
-      // And it still follows the state afterwards.
       await emitRecording(tester, false);
       expect(find.byType(UiKitView), findsNothing);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
@@ -233,18 +305,15 @@ void main() {
       await tester.pumpWidget(region(protection: SensitiveProtection.whileRecording));
       expect(find.byType(UiKitView), findsNothing);
 
-      // Going to the background must not engage it in this mode.
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await tester.pump();
       expect(find.byType(UiKitView), findsNothing);
 
-      // A recording must.
       await emitRecording(tester, true);
       expect(find.byType(UiKitView), findsOneWidget);
       await settleSnapshot(tester);
       expect(renderRegion(tester).captureColor, isNotNull);
 
-      // A recording that starts while the app is backgrounded still engages it.
       await emitRecording(tester, false);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await tester.pump();
@@ -350,8 +419,7 @@ void main() {
         ),
       );
 
-      // The region receives a tight 200x100 from the SizedBox and has to hand it
-      // to the guarded subtree untouched: a loose stack would report 0 here.
+      // The tight 200x100 constraints must reach the subtree untouched.
       expect(seen!.minWidth, 200);
       expect(seen!.minHeight, 100);
       expect(seen!.maxHeight, 100);
@@ -418,6 +486,9 @@ void main() {
 
       rebuild(() => value++);
       await tester.pump();
+      // Refreshes are capped by the default refresh interval; the repaint lands once
+      // that window has passed.
+      await tester.pump(ScreenshotShieldSensitiveView.defaultRefreshInterval);
       await settleSnapshot(tester);
 
       expect(find.text('value 1'), findsOneWidget);
@@ -498,13 +569,68 @@ void main() {
       rebuild(() => value++);
       await tester.pump();
       await settleSnapshot(tester);
-      // Inside the throttle window the copy is not re-rasterised.
       expect(snapshotCount(), afterFirstCopy);
 
-      // The deferred refresh lands once the window has passed.
       await tester.pump(const Duration(seconds: 2));
       await settleSnapshot(tester);
       expect(snapshotCount(), greaterThan(afterFirstCopy));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    /// Runs [frames] frames of [frameTime] while an animation repaints the region,
+    /// letting each capture complete, and returns how many copies were sent.
+    Future<int> copiesWhileAnimating(WidgetTester tester, {Duration? refreshInterval, int frames = 30}) async {
+      await tester.pumpWidget(
+        region(protection: SensitiveProtection.always, refreshInterval: refreshInterval, child: const _Spinner()),
+      );
+      await settleSnapshot(tester);
+      final int before = snapshotCount();
+      for (var i = 0; i < frames; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      }
+      await settleSnapshot(tester);
+      return snapshotCount() - before;
+    }
+
+    testWidgets('keeps an animating region live, capped by the default refresh interval', (WidgetTester tester) async {
+      // 30 frames of 16 ms is ~480 ms of animation: at most ~15 copies at 33 ms apart.
+      final int copies = await copiesWhileAnimating(tester);
+      expect(copies, greaterThan(3), reason: 'the copy must keep tracking the animation');
+      final int cap = (30 * 16 / ScreenshotShieldSensitiveView.defaultRefreshInterval.inMilliseconds).ceil() + 2;
+      expect(copies, lessThanOrEqualTo(cap), reason: 'refreshes must respect the default interval');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('keeps refreshing an animating region after it disengages and re-engages', (WidgetTester tester) async {
+      // Opening Control Center to start a recording disengages and re-engages a region;
+      // a throttle timer left over from the first engagement froze the copy.
+      Future<void> animate(int frames) async {
+        for (var i = 0; i < frames; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+        }
+      }
+
+      await tester.pumpWidget(region(child: const _Spinner()));
+      await emitRecording(tester, true);
+      await settleSnapshot(tester);
+      await animate(10);
+      await emitRecording(tester, false);
+      await animate(2);
+      await emitRecording(tester, true);
+      await settleSnapshot(tester);
+
+      final int before = snapshotCount();
+      await animate(30);
+      await settleSnapshot(tester);
+      expect(snapshotCount() - before, greaterThan(3), reason: 'the copy must keep tracking the animation');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('refreshes an animating region more often with Duration.zero', (WidgetTester tester) async {
+      final int capped = await copiesWhileAnimating(tester);
+      await tester.pumpWidget(const SizedBox());
+      viewCalls.clear();
+      final int everyFrame = await copiesWhileAnimating(tester, refreshInterval: Duration.zero);
+      expect(everyFrame, greaterThan(capped));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('creates the platform view once, not on every refresh', (WidgetTester tester) async {
@@ -554,4 +680,37 @@ void main() {
       expect(platform.calls, isNot(contains('startListening')));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
   });
+}
+
+/// Repaints on every frame, like a spinner or a live chart inside a sensitive region.
+class _Spinner extends StatefulWidget {
+  const _Spinner();
+
+  @override
+  State<_Spinner> createState() => _SpinnerState();
+}
+
+class _SpinnerState extends State<_Spinner> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(vsync: this, duration: const Duration(seconds: 1))
+    ..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 200,
+      height: 80,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (BuildContext context, Widget? child) =>
+            Transform.rotate(angle: _controller.value * 6.283185307179586, child: child),
+        child: const Text('spinning'),
+      ),
+    );
+  }
 }

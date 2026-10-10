@@ -1,24 +1,13 @@
 import UIKit
 
-/// The secure-text-field technique shared by the whole-window capture
-/// protection and the per-region `ScreenshotShieldSensitiveView`.
-///
-/// iOS has no public API for excluding content from screenshots or screen
-/// recordings. A `UITextField` with `isSecureTextEntry` enabled is rendered by
-/// UIKit through a private, capture-excluded canvas layer, which is exposed as
-/// one of its subviews (historically `_UITextLayoutCanvasView`). Nesting a
-/// layer into that canvas layer is what excludes the content inside it from
-/// system captures - adding the field next to the content protects nothing but
-/// the (empty) field itself.
-///
-/// This depends on undocumented UIKit behaviour and can break on any iOS
-/// release.
+/// The secure-text-field technique shared by window protection and the per-region
+/// `ScreenshotShieldSensitiveView`. iOS has no public API: a `UITextField` with
+/// `isSecureTextEntry` is rendered through a private capture-excluded canvas layer,
+/// and nesting a layer into that canvas excludes its content. Undocumented behaviour.
 enum SecureCanvas {
-    /// Creates the capture-excluded text field used as a container.
-    ///
-    /// The caller is expected to add the field to the hierarchy and lay it out
-    /// before calling [containerLayer(of:)], because UIKit builds the canvas
-    /// lazily.
+    /// Creates the capture-excluded text field used as a container. The caller
+    /// must add it to the hierarchy and lay it out before calling
+    /// [containerView(of:)], because UIKit builds the canvas lazily.
     static func makeField(frame: CGRect) -> UITextField {
         let field = UITextField()
         field.isSecureTextEntry = true
@@ -28,17 +17,10 @@ enum SecureCanvas {
         return field
     }
 
-    /// The private, capture-excluded canvas view UIKit builds inside a secure
-    /// text field, or `nil` while the field has not been laid out yet.
-    ///
-    /// Hold the *view*, not just its layer, whenever the nesting has to survive
-    /// across layout passes: the canvas layer's `delegate` is this view, and that
-    /// property is `unowned(unsafe)`. A layer kept alive on its own can therefore
-    /// outlive the view and be left with a dangling delegate - touching it then
-    /// retains a deallocated object, which crashes in `objc_retain` (this is what
-    /// happens when UIKit rebuilds the private canvas during one of its own
-    /// layout or snapshot passes). Re-resolving the view from the field and
-    /// re-nesting is the safe pattern; see `ScreenshotShieldSensitiveView`.
+    /// The private capture-excluded canvas view inside a secure text field, or `nil`
+    /// before the field is laid out. Hold the *view*, not its layer: the canvas
+    /// layer's `delegate` is `unowned(unsafe)`, so a lone layer can outlive the view
+    /// and crash in `objc_retain`. Re-resolve rather than caching the layer.
     static func containerView(of field: UITextField) -> UIView? {
         if let canvas = canvasView(in: field) {
             return canvas
@@ -48,12 +30,8 @@ enum SecureCanvas {
         return nil
     }
 
-    /// The private capture-excluded layer UIKit builds inside a secure text
-    /// field. The field's last sublayer is used as a fallback for the same layer
-    /// when the canvas view cannot be identified.
-    ///
-    /// Only use this for an immediate nesting; anything that holds the result
-    /// across layout passes must hold [containerView(of:)] instead.
+    /// The capture-excluded layer, falling back to the field's last sublayer. For
+    /// immediate nesting only; across layout passes hold [containerView(of:)].
     static func containerLayer(of field: UITextField) -> CALayer? {
         if let canvas = containerView(of: field) {
             log("secure canvas view: \(NSStringFromClass(type(of: canvas))), frame \(canvas.frame)")
@@ -74,9 +52,7 @@ enum SecureCanvas {
         return nil
     }
 
-    /// Diagnostics while debugging a device build; capture exclusion relies on
-    /// undocumented UIKit behaviour, so it is worth being able to see whether a
-    /// layer was actually nested in the secure container.
+    /// Diagnostics: this relies on undocumented UIKit behaviour.
     static func log(_ message: String) {
         #if DEBUG
             NSLog("[ScreenshotShield] \(message)")

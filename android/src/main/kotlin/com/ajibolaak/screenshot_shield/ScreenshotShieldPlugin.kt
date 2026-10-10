@@ -2,16 +2,11 @@ package com.ajibolaak.screenshot_shield
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Color
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.os.Build
+import android.os.HandlerThread
 import android.provider.MediaStore
 import android.util.Log
-import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.FrameLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -21,13 +16,10 @@ import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
 import io.flutter.plugin.common.PluginRegistry
 
 /**
- * Detects user screenshots, optionally prevents screen capture, and can blur
- * the app content while the app is in the background.
- *
- * On Android 14+ (API 34) the framework `DETECT_SCREEN_CAPTURE` API is used
- * when the activity is started; on older devices the media store is observed
- * while the activity is started. Background blur uses `RenderEffect` on
- * Android 12+ and a dim overlay below that.
+ * Detects user screenshots, optionally prevents capture, and hides the app content
+ * from the app switcher. Android 14+ uses `DETECT_SCREEN_CAPTURE`; older devices
+ * observe the media store. The app-switcher thumbnail is disabled outright on
+ * Android 13+; below that the content is blurred or dimmed while backgrounded.
  */
 class ScreenshotShieldPlugin :
     FlutterPlugin,
@@ -43,8 +35,14 @@ class ScreenshotShieldPlugin :
     private var contentObserver: ScreenshotContentObserver? = null
     private var screenCaptureCallback: Activity.ScreenCaptureCallback? = null
     private var screenRecordingCallback: java.util.function.Consumer<Int>? = null
-    private var backgroundDimView: View? = null
+    private var blurController: ScreenBlurController? = null
+    private var observerThread: HandlerThread? = null
     private var listening = false
+    // What Dart asked for, or null if it never asked. Only an explicit request touches
+    // the window, so a host app's own FLAG_SECURE or recents setting is left alone.
+    private var protectRequested: Boolean? = null
+    // Whether the plugin itself disabled the recents thumbnail (Android 13+).
+    private var recentsDisabledByPlugin = false
     private var activityStarted = false
     private var backgrounded = false
     private var backgroundBlurEnabled = false
@@ -64,6 +62,9 @@ class ScreenshotShieldPlugin :
         clearBackgroundBlur()
         ScreenshotShieldHostApi.setUp(binding.binaryMessenger, null)
         contentObserver = null
+        observerThread?.quitSafely()
+        observerThread = null
+        blurController = null
         applicationContext = null
         activity = null
     }
@@ -71,15 +72,17 @@ class ScreenshotShieldPlugin :
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activityBinding = binding
         activity = binding.activity
+        // A new activity (config change, cached engine) starts without what the plugin
+        // set on the previous one; re-apply only what Dart explicitly asked for.
+        if (protectRequested == true) applyProtection()
+        if (backgroundBlurEnabled) applyRecentsScreenshotPolicy()
         lifecycle = (binding.lifecycle as? HiddenLifecycleReference)?.lifecycle
-        // If the lifecycle is unavailable (e.g. a custom activity embedding that
-        // does not expose one), fall back to treating the activity as started so
-        // screenshot detection can still be registered.
+        // No lifecycle exposed (a custom activity embedding): treat the activity as
+        // started so screenshot detection can still be registered.
         if (lifecycle == null) {
             activityStarted = true
         }
-        // Fires before onPause when the user leaves the app (home/recents/back),
-        // so the blur is applied before the recents thumbnail is captured.
+        // Fires before onPause, so the blur lands before the recents thumbnail.
         val userLeaveHintListener = PluginRegistry.UserLeaveHintListener {
             applyBackgroundBlur()
         }
@@ -104,6 +107,9 @@ class ScreenshotShieldPlugin :
                 Lifecycle.Event.ON_RESUME -> {
                     backgrounded = false
                     clearBackgroundBlur()
+                }
+                Lifecycle.Event.ON_DESTROY -> {
+                    activityStarted = false
                 }
                 else -> {}
             }
@@ -132,34 +138,49 @@ class ScreenshotShieldPlugin :
         unregisterScreenRecordingCallback()
         clearBackgroundBlur()
         activity = null
+        // Without an activity nothing is visible to capture, so stop observing too.
+        activityStarted = false
+        backgrounded = false
+        updateObservation()
     }
 
     override fun startListening() {
-        Log.d(TAG, "startListening")
+        debugLog("startListening")
         listening = true
         updateObservation()
     }
 
     override fun stopListening() {
-        Log.d(TAG, "stopListening")
+        debugLog("stopListening")
         listening = false
         updateObservation()
     }
 
     override fun setProtected(protected: Boolean) {
+        protectRequested = protected
+        applyProtection()
+    }
+
+    private fun applyProtection() {
         val window = activity?.window ?: return
-        if (protected) {
-            window.setFlags(
+        when (protectRequested) {
+            true -> window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
                 WindowManager.LayoutParams.FLAG_SECURE,
             )
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            false -> window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            null -> {}
         }
+    }
+
+    override fun setKeyboardProtected(enabled: Boolean) {
+        // The IME is another app's window and cannot be excluded from captures at
+        // all, so this only accepts the call; keep sensitive input inside the app.
     }
 
     override fun setBackgroundBlur(blurEnabled: Boolean) {
         backgroundBlurEnabled = blurEnabled
+        applyRecentsScreenshotPolicy()
         if (backgrounded) {
             applyBackgroundBlur()
         } else {
@@ -167,43 +188,35 @@ class ScreenshotShieldPlugin :
         }
     }
 
-    private fun applyBackgroundBlur() {
-        if (!backgroundBlurEnabled) return
-        val decorView = activity?.window?.decorView as? ViewGroup ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            decorView.setRenderEffect(
-                RenderEffect.createBlurEffect(
-                    BLUR_RADIUS,
-                    BLUR_RADIUS,
-                    Shader.TileMode.MIRROR,
-                ),
-            )
-        } else {
-            val dimView = backgroundDimView ?: View(applicationContext).apply {
-                setBackgroundColor(Color.argb(217, 0, 0, 0))
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            }.also { backgroundDimView = it }
-            if (dimView.parent == null) {
-                decorView.addView(dimView)
-                decorView.requestLayout()
-            }
+    /**
+     * Android 13+ can drop the app-switcher thumbnail outright. Unlike FLAG_SECURE it
+     * leaves screenshots and their detection alone, and unlike a view blur it also
+     * works with Flutter's default SurfaceView, which a parent RenderEffect cannot reach.
+     */
+    private fun applyRecentsScreenshotPolicy() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val currentActivity = activity ?: return
+        if (backgroundBlurEnabled) {
+            currentActivity.setRecentsScreenshotEnabled(false)
+            recentsDisabledByPlugin = true
+        } else if (recentsDisabledByPlugin) {
+            // Only undo what the plugin did; a host that disabled it itself keeps that.
+            currentActivity.setRecentsScreenshotEnabled(true)
+            recentsDisabledByPlugin = false
         }
-        // Commit the blur into the next frame before the recents thumbnail is
-        // captured (the Android analog of the iOS CATransaction.flush).
-        decorView.invalidate()
+    }
+
+    /** Older versions have no thumbnail switch: cover the content while backgrounded. */
+    private fun applyBackgroundBlur() {
+        if (!backgroundBlurEnabled || Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
+        val currentActivity = activity ?: return
+        val controller = blurController
+            ?: ScreenBlurController(currentActivity.applicationContext).also { blurController = it }
+        controller.apply(currentActivity)
     }
 
     private fun clearBackgroundBlur() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            activity?.window?.decorView?.setRenderEffect(null)
-        } else {
-            val dimView = backgroundDimView ?: return
-            (dimView.parent as? ViewGroup)?.removeView(dimView)
-            backgroundDimView = null
-        }
+        blurController?.clear()
     }
 
     private fun updateObservation() {
@@ -220,11 +233,11 @@ class ScreenshotShieldPlugin :
         if (listening && activityStarted && currentActivity != null) {
             if (screenCaptureCallback != null) return
             val callback = Activity.ScreenCaptureCallback {
-                Log.d(TAG, "system screen capture callback fired")
+                debugLog("system screen capture callback fired")
                 streamHandler.emitScreenshotDetected()
             }
             screenCaptureCallback = callback
-            Log.d(TAG, "registering screen capture callback")
+            debugLog("registering screen capture callback")
             currentActivity.registerScreenCaptureCallback(currentActivity.mainExecutor, callback)
         } else {
             unregisterScreenCaptureCallback()
@@ -237,11 +250,7 @@ class ScreenshotShieldPlugin :
         screenCaptureCallback = null
     }
 
-    /**
-     * Registers for screen recording state changes on Android 15 (API 35) and
-     * newer. Older versions have no public detection API, so nothing is
-     * registered and the event stream never emits.
-     */
+    /** Screen recording changes on Android 15+; older versions have no public API. */
     private fun updateScreenRecordingCallback() {
         val currentActivity = activity
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&
@@ -256,7 +265,7 @@ class ScreenshotShieldPlugin :
                 )
             }
             screenRecordingCallback = callback
-            Log.d(TAG, "registering screen recording callback")
+            debugLog("registering screen recording callback")
             val initialState = currentActivity.windowManager.addScreenRecordingCallback(
                 currentActivity.mainExecutor,
                 callback,
@@ -286,10 +295,15 @@ class ScreenshotShieldPlugin :
             return
         }
         if (contentObserver != null) return
-        contentObserver = ScreenshotContentObserver(context.contentResolver) {
+        // Media store queries are disk I/O: run them off the main thread.
+        val thread = observerThread ?: HandlerThread("ScreenshotShieldObserver").also {
+            it.start()
+            observerThread = it
+        }
+        contentObserver = ScreenshotContentObserver(context.contentResolver, thread.looper) {
             streamHandler.emitScreenshotDetected()
         }
-        Log.d(TAG, "registering media store content observer")
+        debugLog("registering media store content observer")
         context.contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             true,
@@ -311,8 +325,12 @@ class ScreenshotShieldPlugin :
 
     private companion object {
         const val TAG = "ScreenshotShield"
-        const val BLUR_RADIUS = 24f
     }
+}
+
+/** Debug logging, off unless enabled with `adb shell setprop log.tag.ScreenshotShield DEBUG`. */
+internal fun debugLog(message: String) {
+    if (Log.isLoggable("ScreenshotShield", Log.DEBUG)) Log.d("ScreenshotShield", message)
 }
 
 private class ScreenshotShieldStreamHandler : OnScreenshotDetectedStreamHandler() {
@@ -326,8 +344,11 @@ private class ScreenshotShieldStreamHandler : OnScreenshotDetectedStreamHandler(
         eventSink = null
     }
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Safe from any thread: event sinks must be used on the main thread. */
     fun emitScreenshotDetected() {
-        eventSink?.success(0)
+        mainHandler.post { eventSink?.success(0) }
     }
 }
 

@@ -8,15 +8,12 @@ export 'src/screenshot_shield_sensitive_view.dart' hide RenderScreenshotShieldRe
 
 /// Guards a screen against being captured by the user.
 ///
-/// Use [startListening] to begin reporting [onScreenshotDetected] and
-/// [onScreenRecordingChanged] events, and [setProtection] to configure screen
-/// protection.
-///
-/// Screenshot detection is best-effort: on Android it is reported shortly
-/// after the screenshot is saved to the media store, on iOS it is reported
-/// immediately when the screenshot is taken. Screen-recording detection is
-/// supported on iOS and on Android 15 (API 35) and newer.
+/// Screenshot detection is best-effort: Android reports it once the screenshot is
+/// saved, iOS immediately. Screen-recording detection needs iOS or Android 15+.
 class ScreenshotShield {
+  /// Creates a shield backed by the platform implementation.
+  ///
+  /// Pass [platform] to substitute a fake in tests.
   ScreenshotShield({ScreenshotShieldPlatform? platform}) : _platform = platform ?? ScreenshotShieldPlatform.instance;
 
   final ScreenshotShieldPlatform _platform;
@@ -24,64 +21,52 @@ class ScreenshotShield {
   /// Emits an event each time the user captures a screenshot.
   Stream<void> get onScreenshotDetected => _platform.onScreenshotDetected;
 
-  /// Emits the current screen-recording state whenever it changes.
+  /// Emits the screen-recording state whenever it changes.
   ///
-  /// The stream emits `true` when the app is visible in a screen recording and
-  /// `false` when it is no longer recorded, including the current state when
-  /// first listened to. Detection requires [startListening] to be active and
-  /// is platform-specific: on iOS it reflects `UIScreen.isCaptured`, which is
-  /// also `true` while the screen is mirrored (for example via AirPlay); on
-  /// Android it uses the Android 15 (API 35) `DETECT_SCREEN_RECORDING` API and
-  /// never emits on older versions.
+  /// The current state is emitted on first listen. iOS reports whether the app's scene is
+  /// recorded, mirrored (AirPlay) or shared; Android needs API 35 and never emits below
+  /// it; Windows and Linux use a best-effort heuristic that looks for recorder programs.
   Stream<bool> get onScreenRecordingChanged => _platform.onScreenRecordingChanged;
 
-  /// Whether the app is currently visible in a screen recording (or a mirrored
-  /// screen).
+  /// Whether the app is currently visible in a screen recording or mirrored screen.
   ///
-  /// [onScreenRecordingChanged] only delivers *changes*; read this for the current
-  /// state, because the stream will not replay what a listener that arrived late
-  /// missed. A screen that appears while a recording is already running can
-  /// therefore check this once when it is built and still protect itself.
+  /// [onScreenRecordingChanged] only delivers changes, so read this when a screen appears
+  /// mid-recording. `false` until the platform has reported a state.
   bool get isScreenRecording => _platform.isScreenRecording;
 
-  /// Starts observing for screenshots.
+  /// Starts observing for screenshots and screen recordings.
+  ///
+  /// Calls are counted: detection keeps running until [stopListening] has been called
+  /// as many times as this was.
   Future<void> startListening() => _platform.startListening();
 
-  /// Stops observing for screenshots.
+  /// Stops observing, once every [startListening] call has been matched.
   Future<void> stopListening() => _platform.stopListening();
 
   /// Whether whole-window capture prevention is currently enabled.
   ///
-  /// This reflects the last `preventCapture` value passed to [setProtection] on
-  /// any [ScreenshotShield] in the process, which is what the platform plugin
-  /// applies - capture prevention is a property of the window, not of a
-  /// [ScreenshotShield] instance. [ScreenshotShieldSensitiveView] listens to it
-  /// so that a guarded region stays inactive (and does no rasterising) while the
-  /// whole window is already excluded from captures.
+  /// Reflects the last `preventCapture` passed to [setProtection] anywhere in the process:
+  /// prevention belongs to the window, not to an instance.
   static ValueListenable<bool> get preventCaptureActive => _preventCaptureActive;
 
   static final ValueNotifier<bool> _preventCaptureActive = ValueNotifier<bool>(false);
 
   /// Configures screen protection.
   ///
-  /// [preventCapture] prevents screen capture while the guarded route is in
-  /// view. On Android the secure window flag blanks the captured frame; on iOS
-  /// a hidden secure text field makes the system exclude the window from
-  /// snapshots, so user screenshots come out blank too. On Android the secure
-  /// flag also suppresses screenshot detection (the blanked frame is never
-  /// saved and the system withholds the capture callback for secure windows),
-  /// so the guards drop prevention when detection is also requested there and
-  /// instead re-rasterize the guarded screen into a shareable image when a
-  /// screenshot is detected.
+  /// [preventCapture] blanks captured frames: screenshots, screen recordings and the
+  /// app-switcher snapshot (Android, iOS and Windows). On Android a secure window also
+  /// suppresses screenshot detection, so the guards keep detection and drop prevention
+  /// there when both are requested.
   ///
-  /// [backgroundBlur] blurs the app content while the app is in the
-  /// background, hiding it in the app switcher. On iOS the key window is
-  /// covered with a native blur effect. On Android 12+ the window is blurred
-  /// with `RenderEffect`; on older Android versions a dim overlay is shown
-  /// because no public blur API exists.
+  /// This sets the window's state directly. The guards count their requests instead, so
+  /// prevention stays on while any guard needs it; prefer them over calling this yourself.
   ///
-  /// Both flags default to disabled. Omitted flags keep their current value,
-  /// so a single call can toggle one setting without disturbing the other.
+  /// [backgroundBlur] hides the app's content in the app switcher: on Android 13+ the
+  /// thumbnail is disabled (screenshots and their detection are unaffected), on Android 12
+  /// and below the content is blurred or covered, on iOS it is blurred, and on Windows the
+  /// taskbar and Alt+Tab previews show the app icon instead of the window.
+  ///
+  /// Omitted flags keep their current value.
   Future<void> setProtection({bool? preventCapture, bool? backgroundBlur}) async {
     if (preventCapture != null) {
       await _platform.setProtected(protected: preventCapture);
@@ -91,6 +76,14 @@ class ScreenshotShield {
       await _platform.setBackgroundBlur(blurEnabled: backgroundBlur);
     }
   }
+
+  /// iOS only: keeps the on-screen keyboard out of captures.
+  ///
+  /// The keyboard is its own system window, so neither whole-window protection nor a
+  /// sensitive region covers it; this nests it in the same capture-excluded canvas the
+  /// region uses. Undocumented UIKit behaviour, so verify it on the iOS versions you
+  /// support. No-op on Android, where the keyboard belongs to another app.
+  Future<void> setKeyboardProtection({required bool enabled}) => _platform.setKeyboardProtection(enabled: enabled);
 
   /// Releases the native resources held by the plugin.
   Future<void> dispose() => _platform.dispose();
