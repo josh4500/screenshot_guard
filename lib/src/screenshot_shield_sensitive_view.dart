@@ -3,7 +3,6 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart' show Theme;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -62,8 +61,14 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
   /// capture does, because the excluded canvas contributes nothing to it.
   final Color? captureColor;
 
-  /// What the user sees behind the copy, where [child] is transparent. Defaults to the
-  /// scaffold background colour.
+  /// What the user sees behind the copy where [child] is transparent, while the region
+  /// is engaged. Defaults to transparent.
+  ///
+  /// The copy sits over [captureColor], so with a transparent backdrop any see-through
+  /// part of [child] - rounded corners, gaps between cells - shows [captureColor] on
+  /// screen while engaged. For such content, set this to the colour behind the region
+  /// (for example `Theme.of(context).colorScheme.surface`). Opaque, rectangular content
+  /// needs nothing.
   final Color? backdropColor;
 
   /// When the region is kept out of captures. Defaults to
@@ -160,7 +165,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
   Color get _captureColor => widget.captureColor ?? const Color(0xFF000000);
 
   /// What the user sees behind the copy, inside the capture-excluded canvas.
-  Color get _backdropColor => widget.backdropColor ?? Theme.of(context).scaffoldBackgroundColor;
+  Color get _backdropColor => widget.backdropColor ?? const Color(0x00000000);
 
   /// Whether the recording state has to be watched.
   bool get _watchesRecording => widget.protection != SensitiveProtection.always;
@@ -299,6 +304,9 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
       _snapshotReady = false;
       _retryTimer?.cancel();
       _throttleTimer?.cancel();
+      // Cleared, not just cancelled: a leftover timer reads as "a refresh is due", and
+      // a re-engaged region would then never refresh its copy again.
+      _throttleTimer = null;
       return;
     }
     _restartRetryTimer();
@@ -329,7 +337,7 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
       scheduleRefresh();
       return;
     }
-    if (_throttleTimer != null) {
+    if (_throttleTimer?.isActive ?? false) {
       // A refresh is already due at the end of the window; it captures the latest
       // paint, so this one needs nothing of its own. (Refreshing here instead would
       // refresh on every frame of a continuous animation.)
@@ -442,10 +450,11 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     }
     final bool engaged = _engaged;
     return ScreenshotShieldRegionLayout(
-      // Until the first copy lands, the live subtree would be visible to a capture, so
-      // it is covered with the (opaque) backdrop: the user sees the region blank for a
-      // frame or two instead of the recording seeing its content.
-      captureColor: engaged ? (_snapshotReady ? _captureColor : _backdropColor.withAlpha(0xFF)) : null,
+      // Nothing covers the live subtree until the first copy lands, so the region never
+      // flashes on screen. A capture can see it for that frame or two - on top of the
+      // delay before iOS reports a recording at all; `SensitiveProtection.always` keeps
+      // the copy in place permanently for regions that cannot afford either.
+      captureColor: engaged && _snapshotReady ? _captureColor : null,
       onSubtreeSizeChanged: scheduleRefresh,
       children: <Widget>[
         // Same position in the element tree whether or not the region is engaged.
