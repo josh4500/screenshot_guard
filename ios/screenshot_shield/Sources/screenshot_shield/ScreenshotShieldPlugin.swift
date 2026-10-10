@@ -6,6 +6,11 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     private let screenRecordingStreamHandler = ScreenRecordingStreamHandler()
     private var screenshotObserver: NSObjectProtocol?
     private var screenRecordingObserver: NSObjectProtocol?
+    // iOS 17+: a trait-change registration on the window for `sceneCaptureState`,
+    // and an observer that (re)registers once a window exists or after it changes.
+    private var captureTraitRegistration: AnyObject?
+    private weak var captureTraitWindow: UIWindow?
+    private var captureActivationObserver: NSObjectProtocol?
     private var secureTextField: UITextField?
     private var protectedContentView: UIView?
     private weak var protectedContentSuperlayer: CALayer?
@@ -64,8 +69,48 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
                 self?.emitScreenRecordingState()
             }
         }
-        // Report the current state now; the notification only fires on changes.
+        if captureActivationObserver == nil {
+            captureActivationObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.registerCaptureTraitObserver()
+                self?.emitScreenRecordingState()
+            }
+        }
+        registerCaptureTraitObserver()
+        // Report the current state now; the observers only fire on changes.
         emitScreenRecordingState()
+    }
+
+    /// iOS 17+ reports capture per scene through a trait, and does not reliably post
+    /// `UIScreen.capturedDidChangeNotification` for it, so observe the trait itself.
+    private func registerCaptureTraitObserver() {
+        guard #available(iOS 17.0, *) else { return }
+        guard let window = Self.keyWindow() else { return }
+        if captureTraitRegistration != nil, captureTraitWindow === window { return }
+        unregisterCaptureTraitObserver()
+        // Pigeon calls and the observers above all run on the main thread.
+        let registration = MainActor.assumeIsolated {
+            window.registerForTraitChanges([UITraitSceneCaptureState.self]) {
+                [weak self] (_: UIWindow, _: UITraitCollection) in
+                self?.emitScreenRecordingState()
+            }
+        }
+        captureTraitRegistration = registration as AnyObject
+        captureTraitWindow = window
+    }
+
+    private func unregisterCaptureTraitObserver() {
+        if #available(iOS 17.0, *),
+            let registration = captureTraitRegistration as? UITraitChangeRegistration,
+            let window = captureTraitWindow
+        {
+            MainActor.assumeIsolated { window.unregisterForTraitChanges(registration) }
+        }
+        captureTraitRegistration = nil
+        captureTraitWindow = nil
     }
 
     public func stopListening() throws {
@@ -77,6 +122,11 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
             NotificationCenter.default.removeObserver(screenRecordingObserver)
             self.screenRecordingObserver = nil
         }
+        if let captureActivationObserver {
+            NotificationCenter.default.removeObserver(captureActivationObserver)
+            self.captureActivationObserver = nil
+        }
+        unregisterCaptureTraitObserver()
     }
 
     // MARK: - Screen recording
@@ -92,11 +142,12 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         #if targetEnvironment(simulator)
             return false
         #else
-            guard let window = Self.keyWindow() else { return UIScreen.main.isCaptured }
-            if #available(iOS 17.0, *) {
-                return window.traitCollection.sceneCaptureState == .active
+            // Either signal counts: the per-scene trait (iOS 17+) or the scene's screen.
+            let window = Self.keyWindow()
+            if #available(iOS 17.0, *), window?.traitCollection.sceneCaptureState == .active {
+                return true
             }
-            return window.windowScene?.screen.isCaptured ?? UIScreen.main.isCaptured
+            return window?.windowScene?.screen.isCaptured ?? UIScreen.main.isCaptured
         #endif
     }
 
@@ -479,6 +530,11 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         if let screenRecordingObserver {
             NotificationCenter.default.removeObserver(screenRecordingObserver)
         }
+        if let captureActivationObserver {
+            NotificationCenter.default.removeObserver(captureActivationObserver)
+        }
+        // The trait registration holds the plugin weakly, so it can safely outlive it;
+        // UIKit's unregister call is main-actor isolated and cannot run from deinit.
         for token in backgroundObserverTokens + protectionObserverTokens + keyboardObserverTokens {
             NotificationCenter.default.removeObserver(token)
         }

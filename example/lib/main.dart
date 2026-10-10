@@ -209,6 +209,8 @@ class _SecondScreenState extends State<SecondScreen> {
   int _seconds = 0;
   SensitiveProtection _protection = SensitiveProtection.whileCaptured;
   bool _obscureKeyboard = false;
+  // `null` is the package default (about 30 refreshes a second).
+  Duration? _animationRefresh;
 
   @override
   void initState() {
@@ -326,6 +328,41 @@ class _SecondScreenState extends State<SecondScreen> {
             ),
           ),
           const SizedBox(height: 24),
+          const _SectionLabel('Animating region'),
+          const Text(
+            'A region whose content never stops repainting. While it is engaged '
+            '(recording, or "Always" above), each refresh rasterises it and reads it '
+            'back from the GPU, so the refresh rate trades smoothness for cost. Record '
+            'the screen: the card must stay black in the recording at every rate.',
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<Duration?>(
+            segments: const <ButtonSegment<Duration?>>[
+              ButtonSegment<Duration?>(
+                value: Duration.zero,
+                label: Text('Every frame'),
+              ),
+              ButtonSegment<Duration?>(
+                value: null,
+                label: Text('30 fps (default)'),
+              ),
+              ButtonSegment<Duration?>(
+                value: Duration(milliseconds: 100),
+                label: Text('10 fps'),
+              ),
+            ],
+            selected: <Duration?>{_animationRefresh},
+            onSelectionChanged: (Set<Duration?> selection) =>
+                setState(() => _animationRefresh = selection.first),
+          ),
+          const SizedBox(height: 8),
+          ScreenshotShieldSensitiveView(
+            protection: _protection,
+            refreshInterval: _animationRefresh,
+            captureColor: Colors.black,
+            child: const _AnimatedBalanceCard(),
+          ),
+          const SizedBox(height: 24),
           const _SectionLabel('Keyboard'),
           const Text(
             'The keyboard is a separate system window, so neither a guarded screen '
@@ -376,6 +413,89 @@ class _SecondScreenState extends State<SecondScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A card that animates continuously: a sweeping gradient, a progress bar and a
+/// spinner, so the region repaints on every frame.
+class _AnimatedBalanceCard extends StatefulWidget {
+  const _AnimatedBalanceCard();
+
+  @override
+  State<_AnimatedBalanceCard> createState() => _AnimatedBalanceCardState();
+}
+
+class _AnimatedBalanceCardState extends State<_AnimatedBalanceCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (BuildContext context, Widget? child) {
+        final double t = _controller.value;
+        return Container(
+          height: 120,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment(-1 + 2 * t, -1),
+              end: Alignment(1 - 2 * t, 1),
+              colors: const <Color>[Colors.indigo, Colors.purple, Colors.pink],
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Balance',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    Text(
+                      '\u20a6 ${(1250000 + t * 1000).toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    LinearProgressIndicator(
+                      value: t,
+                      backgroundColor: Colors.white24,
+                      color: Colors.white,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Transform.rotate(
+                angle: t * 6.283185307179586,
+                child: const Icon(
+                  Icons.autorenew,
+                  color: Colors.white,
+                  size: 40,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

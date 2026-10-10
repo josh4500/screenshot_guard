@@ -182,11 +182,20 @@ void main() {
       expect(regionRect, bareRect);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('paints nothing over the subtree until a copy exists', (WidgetTester tester) async {
-      await tester.pumpWidget(region(protection: SensitiveProtection.always));
+    testWidgets('covers the subtree with the opaque backdrop until a copy exists', (WidgetTester tester) async {
+      // Before the first copy lands the excluded canvas is empty, so a capture would see
+      // the live subtree: it is covered instead, and the user sees the backdrop briefly.
+      const backdrop = Color(0x80123456);
+      const capture = Color(0xFF000000);
+      await tester.pumpWidget(
+        region(protection: SensitiveProtection.always, backdropColor: backdrop, captureColor: capture),
+      );
 
       expect(find.byType(UiKitView), findsOneWidget);
-      expect(renderRegion(tester).captureColor, isNull);
+      expect(renderRegion(tester).captureColor, backdrop.withAlpha(0xFF));
+
+      await settleSnapshot(tester);
+      expect(renderRegion(tester).captureColor, capture);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('engages while the screen is being recorded', (WidgetTester tester) async {
@@ -404,6 +413,9 @@ void main() {
 
       rebuild(() => value++);
       await tester.pump();
+      // Refreshes are capped by the default refresh interval; the repaint lands once
+      // that window has passed.
+      await tester.pump(ScreenshotShieldSensitiveView.defaultRefreshInterval);
       await settleSnapshot(tester);
 
       expect(find.text('value 1'), findsOneWidget);
@@ -491,6 +503,38 @@ void main() {
       expect(snapshotCount(), greaterThan(afterFirstCopy));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
+    /// Runs [frames] frames of [frameTime] while an animation repaints the region,
+    /// letting each capture complete, and returns how many copies were sent.
+    Future<int> copiesWhileAnimating(WidgetTester tester, {Duration? refreshInterval, int frames = 30}) async {
+      await tester.pumpWidget(
+        region(protection: SensitiveProtection.always, refreshInterval: refreshInterval, child: const _Spinner()),
+      );
+      await settleSnapshot(tester);
+      final int before = snapshotCount();
+      for (var i = 0; i < frames; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      }
+      await settleSnapshot(tester);
+      return snapshotCount() - before;
+    }
+
+    testWidgets('keeps an animating region live, capped by the default refresh interval', (WidgetTester tester) async {
+      // 30 frames of 16 ms is ~480 ms of animation: at most ~15 copies at 33 ms apart.
+      final int copies = await copiesWhileAnimating(tester);
+      expect(copies, greaterThan(3), reason: 'the copy must keep tracking the animation');
+      final int cap = (30 * 16 / ScreenshotShieldSensitiveView.defaultRefreshInterval.inMilliseconds).ceil() + 2;
+      expect(copies, lessThanOrEqualTo(cap), reason: 'refreshes must respect the default interval');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('refreshes an animating region more often with Duration.zero', (WidgetTester tester) async {
+      final int capped = await copiesWhileAnimating(tester);
+      await tester.pumpWidget(const SizedBox());
+      viewCalls.clear();
+      final int everyFrame = await copiesWhileAnimating(tester, refreshInterval: Duration.zero);
+      expect(everyFrame, greaterThan(capped));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
     testWidgets('creates the platform view once, not on every refresh', (WidgetTester tester) async {
       var value = 0;
       late StateSetter rebuild;
@@ -538,4 +582,37 @@ void main() {
       expect(platform.calls, isNot(contains('startListening')));
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
   });
+}
+
+/// Repaints on every frame, like a spinner or a live chart inside a sensitive region.
+class _Spinner extends StatefulWidget {
+  const _Spinner();
+
+  @override
+  State<_Spinner> createState() => _SpinnerState();
+}
+
+class _SpinnerState extends State<_Spinner> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(vsync: this, duration: const Duration(seconds: 1))
+    ..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 200,
+      height: 80,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (BuildContext context, Widget? child) =>
+            Transform.rotate(angle: _controller.value * 6.283185307179586, child: child),
+        child: const Text('spinning'),
+      ),
+    );
+  }
 }
