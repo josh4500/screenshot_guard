@@ -209,7 +209,10 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   void dispose() {
     _routeObserver?.unsubscribe(this);
     _unregister();
-    unawaited(_leaveView());
+    // Unconditionally: a claim taken while entering the view may still be settling
+    // even if the route already left the view.
+    _inView = false;
+    unawaited(_claims.release());
     _screenshotSubscription?.cancel();
     super.dispose();
   }

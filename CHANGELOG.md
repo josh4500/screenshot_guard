@@ -18,7 +18,10 @@
 * **iOS:** the privacy manifest is now bundled (SwiftPM and CocoaPods). Recording state is
   read per scene (`sceneCaptureState` on iOS 17+) instead of from the deprecated
   `UIScreen.main`.
-* **Windows:** `preventCapture` now works, via `SetWindowDisplayAffinity`. The window is no
+* **Windows:** the plugin did not compile and registered under a name the generated
+  registrant could not find; both are fixed and CI now builds it. `preventCapture` now
+  works, via `SetWindowDisplayAffinity` on the top-level window (resolved when used, since
+  the view is not yet parented when the plugin registers). The window is no
   longer hidden whenever it loses focus; `backgroundBlur` instead opts in to icon-only
   taskbar and Alt+Tab previews. Recording detection samples continuously (it ran once) and
   no longer reports the resident Xbox Game Bar as a recorder.
@@ -26,7 +29,16 @@
   `gpu-screen-recorder`) are detected.
 * **Guards:** when one of two active guards went away it switched protection off for both,
   and changing a guard's settings while it was active could leak a listener or stop
-  detection for another guard. Guards now count their requests.
+  detection for another guard. Guards now count their requests, and apply them in order
+  against their latest settings, so a guard removed or reconfigured while a platform call
+  is in flight (or a guarded route covered immediately by another) never leaves the window
+  protected, or unprotected, by mistake.
+* **Android:** attaching to an activity no longer clears a `FLAG_SECURE` or recents
+  setting the host app applied itself; the plugin only re-applies what Dart asked for.
+* **iOS:** a replaced root view (a new root view controller, add-to-app) is now detected
+  and protected, without putting the old root's content back on screen.
+* **Linux:** the recorder scan reads a process's command line only when its short name is
+  ambiguous, since reading it can block behind a stuck process.
 * **iOS:** screen-recording detection did not update on recent iOS versions (tested on
   iOS 27): the plugin now observes the per-scene capture state trait directly.
 * **Region:** fixed a crash (`EXC_BAD_ACCESS`) when a region engaged after UIKit replaced

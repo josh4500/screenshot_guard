@@ -84,11 +84,49 @@ static gboolean is_screen_recorder_program(const gchar* path) {
   return FALSE;
 }
 
-// Reads the program from /proc/<pid>/cmdline rather than /proc/<pid>/comm,
-// which the kernel truncates to 15 characters ("gpu-screen-reco"). The second
-// argument is checked too, for recorders launched through an interpreter
-// ("python3 /usr/bin/kazam").
+// Interpreters a recorder may run under ("python3 /usr/bin/kazam").
+static const char* kInterpreterPrefixes[] = {"python", "perl", "ruby", "node",
+                                             nullptr};
+
+// /proc/<pid>/comm is truncated to 15 characters ("gpu-screen-reco").
+static const gsize kCommMaxLength = 15;
+
+// Whether [comm] could be a recorder whose full name was cut off, or an
+// interpreter running one: only then is the command line worth reading.
+static gboolean needs_cmdline(const gchar* comm) {
+  g_autofree gchar* lower = g_ascii_strdown(comm, -1);
+  if (strlen(lower) == kCommMaxLength) {
+    for (guint i = 0; kScreenRecorderPrograms[i] != nullptr; i++) {
+      if (g_str_has_prefix(kScreenRecorderPrograms[i], lower)) {
+        return TRUE;
+      }
+    }
+  }
+  for (guint i = 0; kInterpreterPrefixes[i] != nullptr; i++) {
+    if (g_str_has_prefix(lower, kInterpreterPrefixes[i])) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+// Matches the program by /proc/<pid>/comm, and reads /proc/<pid>/cmdline only
+// when comm is a truncated recorder name or an interpreter. Reading cmdline
+// takes the target process's mmap lock and can block behind a stuck process,
+// and this runs on the main loop, so it is kept to those few candidates.
 static gboolean is_screen_recorder_pid(const gchar* pid) {
+  g_autofree gchar* comm_path = g_strdup_printf("/proc/%s/comm", pid);
+  g_autofree gchar* comm = nullptr;
+  if (!g_file_get_contents(comm_path, &comm, nullptr, nullptr)) {
+    return FALSE;
+  }
+  g_strstrip(comm);
+  if (is_screen_recorder_program(comm)) {
+    return TRUE;
+  }
+  if (!needs_cmdline(comm)) {
+    return FALSE;
+  }
   g_autofree gchar* path = g_strdup_printf("/proc/%s/cmdline", pid);
   g_autofree gchar* contents = nullptr;
   gsize length = 0;

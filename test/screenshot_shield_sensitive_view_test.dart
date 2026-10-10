@@ -88,6 +88,8 @@ void main() {
     late List<MethodCall> viewCalls;
     late bool respondToSnapshots;
     late int createCalls;
+    // When set, setSnapshot replies wait for it, like a slow channel round trip.
+    Completer<void>? holdSnapshots;
 
     setUp(() {
       platform = _FakeShieldPlatform();
@@ -95,6 +97,7 @@ void main() {
       viewCalls = <MethodCall>[];
       respondToSnapshots = true;
       createCalls = 0;
+      holdSnapshots = null;
       final TestDefaultBinaryMessenger messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       // Stays installed through teardown: disposal also talks to this channel.
       messenger.setMockMethodCallHandler(SystemChannels.platform_views, (MethodCall call) async {
@@ -106,6 +109,10 @@ void main() {
               MethodCall call,
             ) async {
               viewCalls.add(call);
+              final Completer<void>? hold = holdSnapshots;
+              if (call.method == 'setSnapshot' && hold != null) {
+                await hold.future;
+              }
               return null;
             });
           }
@@ -219,6 +226,37 @@ void main() {
       await tester.tap(find.text('secret'));
       expect(taps, 1);
       expect(find.bySemanticsLabel('hidden'), findsNothing);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('a copy still in flight when the region disengages does not count for the next engagement', (
+      WidgetTester tester,
+    ) async {
+      const placeholderKey = Key('placeholder');
+      await tester.pumpWidget(
+        region(
+          child: const _Spinner(),
+          capturePlaceholder: const ColoredBox(key: placeholderKey, color: Color(0xFF000000)),
+        ),
+      );
+      await emitRecording(tester, true);
+      await settleSnapshot(tester);
+      expect(find.byKey(placeholderKey), findsOneWidget);
+
+      // The next copy's reply is held while the recording stops.
+      final hold = Completer<void>();
+      holdSnapshots = hold;
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await emitRecording(tester, false);
+      expect(find.byKey(placeholderKey), findsNothing);
+
+      // The stale reply lands, then the region engages again with a fresh native view.
+      holdSnapshots = null;
+      hold.complete();
+      await tester.pump();
+      platform.recording.add(true);
+      await tester.pump();
+      expect(find.byKey(placeholderKey), findsNothing, reason: 'no copy exists for the new view yet');
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('keeps the same native view when the placeholder appears', (WidgetTester tester) async {

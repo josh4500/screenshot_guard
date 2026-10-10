@@ -40,7 +40,7 @@ flutter:
       ios:
         pluginClass: ScreenshotShieldPlugin
       windows:
-        pluginClass: ScreenshotShieldPlugin
+        pluginClass: ScreenshotShieldPluginCApi
       linux:
         pluginClass: ScreenshotShieldPlugin
 

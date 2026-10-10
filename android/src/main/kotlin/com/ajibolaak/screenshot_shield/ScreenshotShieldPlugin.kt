@@ -38,8 +38,11 @@ class ScreenshotShieldPlugin :
     private var blurController: ScreenBlurController? = null
     private var observerThread: HandlerThread? = null
     private var listening = false
-    // Requested by Dart; re-applied to every activity that attaches.
-    private var protectRequested = false
+    // What Dart asked for, or null if it never asked. Only an explicit request touches
+    // the window, so a host app's own FLAG_SECURE or recents setting is left alone.
+    private var protectRequested: Boolean? = null
+    // Whether the plugin itself disabled the recents thumbnail (Android 13+).
+    private var recentsDisabledByPlugin = false
     private var activityStarted = false
     private var backgrounded = false
     private var backgroundBlurEnabled = false
@@ -69,9 +72,10 @@ class ScreenshotShieldPlugin :
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activityBinding = binding
         activity = binding.activity
-        // A new activity (config change, cached engine) starts without the secure flag.
-        applyProtection()
-        applyRecentsScreenshotPolicy()
+        // A new activity (config change, cached engine) starts without what the plugin
+        // set on the previous one; re-apply only what Dart explicitly asked for.
+        if (protectRequested == true) applyProtection()
+        if (backgroundBlurEnabled) applyRecentsScreenshotPolicy()
         lifecycle = (binding.lifecycle as? HiddenLifecycleReference)?.lifecycle
         // No lifecycle exposed (a custom activity embedding): treat the activity as
         // started so screenshot detection can still be registered.
@@ -159,13 +163,13 @@ class ScreenshotShieldPlugin :
 
     private fun applyProtection() {
         val window = activity?.window ?: return
-        if (protectRequested) {
-            window.setFlags(
+        when (protectRequested) {
+            true -> window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
                 WindowManager.LayoutParams.FLAG_SECURE,
             )
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            false -> window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            null -> {}
         }
     }
 
@@ -191,7 +195,15 @@ class ScreenshotShieldPlugin :
      */
     private fun applyRecentsScreenshotPolicy() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        activity?.setRecentsScreenshotEnabled(!backgroundBlurEnabled)
+        val currentActivity = activity ?: return
+        if (backgroundBlurEnabled) {
+            currentActivity.setRecentsScreenshotEnabled(false)
+            recentsDisabledByPlugin = true
+        } else if (recentsDisabledByPlugin) {
+            // Only undo what the plugin did; a host that disabled it itself keeps that.
+            currentActivity.setRecentsScreenshotEnabled(true)
+            recentsDisabledByPlugin = false
+        }
     }
 
     /** Older versions have no thumbnail switch: cover the content while backgrounded. */

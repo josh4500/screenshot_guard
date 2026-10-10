@@ -6,7 +6,7 @@ import android.graphics.Color
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
-import android.view.TextureView
+import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -14,9 +14,9 @@ import android.widget.FrameLayout
 /**
  * Hides an [Activity]'s content while backgrounded, on Android 12 and below (13+
  * disables the app-switcher thumbnail instead). A [RenderEffect] blur (Android 12)
- * reaches only the view hierarchy, so it is applied only when the window has a
- * [TextureView]; Flutter's default SurfaceView draws on a separate surface a parent
- * blur cannot touch and gets an opaque cover instead.
+ * reaches only the view hierarchy, so it is applied only when the window contains no
+ * [SurfaceView] (e.g. Flutter with `RenderMode.texture` and no surface-backed platform
+ * views); otherwise, as with Flutter's default renderer, an opaque cover is shown.
  */
 internal class ScreenBlurController(private val context: Context) {
 
@@ -25,10 +25,13 @@ internal class ScreenBlurController(private val context: Context) {
 
     fun apply(activity: Activity) {
         val decorView = activity.window.decorView
+        // A view RenderEffect cannot reach a SurfaceView's separate surface - Flutter's
+        // default renderer, or a platform view such as a camera preview - so blur only
+        // when the window has none; otherwise cover the content instead.
         val canBlurInPlace =
             decorView is ViewGroup &&
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                containsTextureView(decorView)
+                !containsSurfaceView(decorView)
         if (canBlurInPlace) {
             decorView.setRenderEffect(
                 RenderEffect.createBlurEffect(
@@ -66,11 +69,11 @@ internal class ScreenBlurController(private val context: Context) {
         }
     }
 
-    private fun containsTextureView(view: View): Boolean {
-        if (view is TextureView) return true
+    private fun containsSurfaceView(view: View): Boolean {
+        if (view is SurfaceView) return true
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
-                if (containsTextureView(view.getChildAt(i))) return true
+                if (containsSurfaceView(view.getChildAt(i))) return true
             }
         }
         return false
