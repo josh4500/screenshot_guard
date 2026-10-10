@@ -13,16 +13,12 @@
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_message_codec.h>
 #include <flutter/standard_method_codec.h>
-#include <flutter_windows.h>
 
-#include <algorithm>
-#include <cctype>
+#include <cwchar>
 #include <functional>
 #include <memory>
 #include <optional>
-#include <string>
 #include <variant>
-#include <vector>
 
 namespace screenshot_shield {
 
@@ -57,28 +53,31 @@ constexpr UINT kScreenRecordingPollIntervalMs = 2000;
 // not recording) and false negatives (an unlisted recorder is used). Names are
 // matched exactly, so resident helpers (Xbox Game Bar) and unrelated programs
 // that merely contain a token ("bloomberg") are not mistaken for recorders.
-constexpr const char* kScreenRecorderExecutables[] = {
-    "obs64.exe",          "obs32.exe",       "obs.exe",
-    "bdcam.exe",          "bandicam.exe",    "camtasiastudio.exe",
-    "camrecorder.exe",    "fraps.exe",       "loom.exe",
-    "snagit32.exe",       "screenrec.exe",   "flashbackrecorder.exe",
-    "movavi screen recorder.exe",
+constexpr const wchar_t* kScreenRecorderExecutables[] = {
+    L"obs64.exe",       L"obs32.exe",          L"obs.exe",
+    L"bdcam.exe",       L"bandicam.exe",       L"camtasiastudio.exe",
+    L"camrecorder.exe", L"fraps.exe",          L"loom.exe",
+    L"snagit32.exe",    L"screenrec.exe",      L"flashbackrecorder.exe",
+    L"movavi screen recorder.exe",
 };
 
-std::string LowerAscii(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return value;
-}
-
-bool IsScreenRecorderProcessName(const std::string& name) {
-  const std::string lower = LowerAscii(name);
-  for (const char* executable : kScreenRecorderExecutables) {
-    if (lower == executable) {
+bool IsScreenRecorderExecutable(const wchar_t* name) {
+  for (const wchar_t* executable : kScreenRecorderExecutables) {
+    if (_wcsicmp(name, executable) == 0) {
       return true;
     }
   }
   return false;
+}
+
+// Pigeon sends host API arguments as a list; reads the first one as a bool.
+bool FirstBoolArgument(const flutter::EncodableValue& message) {
+  const auto* args = std::get_if<flutter::EncodableList>(&message);
+  if (args == nullptr || args->empty()) {
+    return false;
+  }
+  const auto* value = std::get_if<bool>(&(*args)[0]);
+  return value != nullptr && *value;
 }
 
 // A stream handler that accepts listeners but never emits events. Screenshot
@@ -128,25 +127,6 @@ class ScreenRecordingStreamHandler
   ScreenshotShieldPlugin* plugin_;
 };
 
-// Replies to a Pigeon host API call with an empty list, which Pigeon treats as
-// a successful response.
-void ReplySuccess(const flutter::BinaryReply& reply,
-                  const flutter::StandardMessageCodec* codec) {
-  auto encoded = codec->EncodeMessage(
-      flutter::EncodableValue(std::vector<flutter::EncodableValue>{}));
-  reply(encoded.get());
-}
-
-// Pigeon sends host API arguments as a list; reads the first one as a bool.
-bool FirstBoolArgument(const flutter::EncodableValue& message) {
-  const auto* args = std::get_if<flutter::EncodableList>(&message);
-  if (args == nullptr || args->empty()) {
-    return false;
-  }
-  const auto* value = std::get_if<bool>(&(*args)[0]);
-  return value != nullptr && *value;
-}
-
 }  // namespace
 
 // static
@@ -156,27 +136,27 @@ void ScreenshotShieldPlugin::RegisterWithRegistrar(
   ScreenshotShieldPlugin* plugin_ptr = plugin.get();
 
   auto messenger = registrar->messenger();
-  const auto* message_codec = &flutter::StandardMessageCodec::GetInstance();
 
   // Windows cannot detect screenshots, but it can keep the window out of
   // captures (setProtected) and out of thumbnails (setBackgroundBlur).
   // start/stopListening drive the best-effort screen-recording detection. The
   // channels are thin wrappers and the handlers are stored on the messenger, so
-  // the local channels are enough.
+  // the local channels are enough. A void Pigeon call is answered with an
+  // empty list, which the channel encodes itself.
   auto register_host_channel =
-      [messenger, message_codec](
+      [messenger](
           const char* name,
           const std::function<void(const flutter::EncodableValue&)>& on_call) {
-        auto channel = std::make_unique<
-            flutter::BasicMessageChannel<flutter::EncodableValue>>(
-            messenger, name, message_codec);
-        channel->SetMessageHandler(
-            [message_codec, on_call](const flutter::EncodableValue& message,
-                                     const flutter::BinaryReply& reply) {
+        flutter::BasicMessageChannel<flutter::EncodableValue> channel(
+            messenger, name, &flutter::StandardMessageCodec::GetInstance());
+        channel.SetMessageHandler(
+            [on_call](const flutter::EncodableValue& message,
+                      const flutter::MessageReply<flutter::EncodableValue>&
+                          reply) {
               if (on_call) {
                 on_call(message);
               }
-              ReplySuccess(reply, message_codec);
+              reply(flutter::EncodableValue(flutter::EncodableList{}));
             });
       };
 
@@ -200,24 +180,21 @@ void ScreenshotShieldPlugin::RegisterWithRegistrar(
   // The keyboard is not a separate capturable surface on Windows.
   register_host_channel(kSetKeyboardProtectedChannel, nullptr);
 
-  auto event_channel =
-      std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
-          messenger, kOnScreenshotDetectedChannel,
-          &flutter::StandardMethodCodec::GetInstance());
-  event_channel->SetStreamHandler(std::make_unique<NoOpStreamHandler>());
+  flutter::EventChannel<flutter::EncodableValue> event_channel(
+      messenger, kOnScreenshotDetectedChannel,
+      &flutter::StandardMethodCodec::GetInstance());
+  event_channel.SetStreamHandler(std::make_unique<NoOpStreamHandler>());
 
-  auto screen_recording_channel =
-      std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
-          messenger, kOnScreenRecordingChangedChannel,
-          &flutter::StandardMethodCodec::GetInstance());
-  screen_recording_channel->SetStreamHandler(
+  flutter::EventChannel<flutter::EncodableValue> screen_recording_channel(
+      messenger, kOnScreenRecordingChangedChannel,
+      &flutter::StandardMethodCodec::GetInstance());
+  screen_recording_channel.SetStreamHandler(
       std::make_unique<ScreenRecordingStreamHandler>(plugin_ptr));
 
-  // Window attributes (capture affinity, thumbnails) and the sampling timer
-  // belong to the top-level window; Flutter's view HWND is a child of it.
   if (auto* view = registrar->GetView()) {
-    HWND root = GetAncestor(view->GetNativeWindow(), GA_ROOT);
-    plugin_ptr->SetWindow(root);
+    plugin_ptr->SetViewWindow(view->GetNativeWindow());
+    // The sampling timer is set on the top-level window, whose messages reach
+    // this delegate.
     registrar->RegisterTopLevelWindowProcDelegate(
         [plugin_ptr](HWND, UINT message, WPARAM wparam,
                      LPARAM) -> std::optional<LRESULT> {
@@ -235,42 +212,54 @@ void ScreenshotShieldPlugin::RegisterWithRegistrar(
 ScreenshotShieldPlugin::ScreenshotShieldPlugin() {}
 
 ScreenshotShieldPlugin::~ScreenshotShieldPlugin() {
-  if (window_ != nullptr) {
-    KillTimer(window_, kScreenRecordingTimerId);
+  if (timer_window_ != nullptr) {
+    KillTimer(timer_window_, kScreenRecordingTimerId);
   }
 }
 
-void ScreenshotShieldPlugin::SetWindow(HWND window) { window_ = window; }
+void ScreenshotShieldPlugin::SetViewWindow(HWND view_window) {
+  view_window_ = view_window;
+}
+
+HWND ScreenshotShieldPlugin::TopLevelWindow() const {
+  if (view_window_ == nullptr) {
+    return nullptr;
+  }
+  return GetAncestor(view_window_, GA_ROOT);
+}
 
 void ScreenshotShieldPlugin::SetProtected(bool protect) {
-  if (window_ == nullptr) {
+  HWND window = TopLevelWindow();
+  if (window == nullptr) {
     return;
   }
   if (!protect) {
-    SetWindowDisplayAffinity(window_, WDA_NONE);
+    SetWindowDisplayAffinity(window, WDA_NONE);
     return;
   }
   // Windows 10 2004+ leaves the window out of captures entirely; older versions
   // only support showing it black.
-  if (!SetWindowDisplayAffinity(window_, WDA_EXCLUDEFROMCAPTURE) &&
-      !SetWindowDisplayAffinity(window_, WDA_MONITOR)) {
-    OutputDebugStringA(
-        "[ScreenshotShield] SetWindowDisplayAffinity failed; capture "
-        "prevention is unavailable on this window.\n");
+  if (!SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE) &&
+      !SetWindowDisplayAffinity(window, WDA_MONITOR)) {
+    OutputDebugStringW(
+        L"[ScreenshotShield] SetWindowDisplayAffinity failed; capture "
+        L"prevention is unavailable on this window.\n");
   }
 }
 
 void ScreenshotShieldPlugin::SetBackgroundBlur(bool enabled) {
-  if (window_ == nullptr) {
+  HWND window = TopLevelWindow();
+  if (window == nullptr) {
     return;
   }
   // Show the app icon instead of a live preview in the taskbar thumbnail and
   // Alt+Tab, and keep the window out of Aero Peek. The window itself stays
   // visible on screen.
   BOOL value = enabled ? TRUE : FALSE;
-  DwmSetWindowAttribute(window_, DWMWA_FORCE_ICONIC_REPRESENTATION, &value,
-                        sizeof(value));
-  DwmSetWindowAttribute(window_, DWMWA_DISALLOW_PEEK, &value, sizeof(value));
+  DwmSetWindowAttribute(window, DWMWA_FORCE_ICONIC_REPRESENTATION, &value,
+                        static_cast<DWORD>(sizeof(value)));
+  DwmSetWindowAttribute(window, DWMWA_DISALLOW_PEEK, &value,
+                        static_cast<DWORD>(sizeof(value)));
 }
 
 void ScreenshotShieldPlugin::StartListening() {
@@ -280,9 +269,11 @@ void ScreenshotShieldPlugin::StartListening() {
   listening_ = true;
   last_state_.reset();
   PollScreenRecording();
-  if (window_ != nullptr) {
-    SetTimer(window_, kScreenRecordingTimerId, kScreenRecordingPollIntervalMs,
-             nullptr);
+  HWND window = TopLevelWindow();
+  if (window != nullptr &&
+      SetTimer(window, kScreenRecordingTimerId, kScreenRecordingPollIntervalMs,
+               nullptr) != 0) {
+    timer_window_ = window;
   }
 }
 
@@ -291,8 +282,9 @@ void ScreenshotShieldPlugin::StopListening() {
     return;
   }
   listening_ = false;
-  if (window_ != nullptr) {
-    KillTimer(window_, kScreenRecordingTimerId);
+  if (timer_window_ != nullptr) {
+    KillTimer(timer_window_, kScreenRecordingTimerId);
+    timer_window_ = nullptr;
   }
 }
 
@@ -330,16 +322,16 @@ bool ScreenshotShieldPlugin::IsKnownRecorderRunning() {
   if (snapshot == INVALID_HANDLE_VALUE) {
     return false;
   }
-  PROCESSENTRY32A entry;
-  entry.dwSize = sizeof(PROCESSENTRY32A);
+  PROCESSENTRY32W entry{};
+  entry.dwSize = static_cast<DWORD>(sizeof(entry));
   bool found = false;
-  if (Process32FirstA(snapshot, &entry)) {
+  if (Process32FirstW(snapshot, &entry)) {
     do {
-      if (IsScreenRecorderProcessName(entry.szExeFile)) {
+      if (IsScreenRecorderExecutable(entry.szExeFile)) {
         found = true;
         break;
       }
-    } while (Process32NextA(snapshot, &entry));
+    } while (Process32NextW(snapshot, &entry));
   }
   CloseHandle(snapshot);
   return found;

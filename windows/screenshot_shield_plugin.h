@@ -24,6 +24,12 @@ class ScreenshotShieldPlugin : public flutter::Plugin {
   void StartListening();
   void StopListening();
 
+  // Host API: keep the window out of screen captures.
+  void SetProtected(bool protect);
+
+  // Host API: hide the live window preview in the taskbar and Alt+Tab.
+  void SetBackgroundBlur(bool enabled);
+
   // Event channel sink management for onScreenRecordingChanged.
   void AttachScreenRecordingSink(
       std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> sink);
@@ -33,14 +39,10 @@ class ScreenshotShieldPlugin : public flutter::Plugin {
   // stream.
   void PollScreenRecording();
 
-  // Host API: keep the window out of screen captures.
-  void SetProtected(bool protect);
-
-  // Host API: hide the live window preview in the taskbar and Alt+Tab.
-  void SetBackgroundBlur(bool enabled);
-
-  // The top-level window the attributes and the sampling timer apply to.
-  void SetWindow(HWND window);
+  // Flutter's view window. The top-level window the attributes and the timer
+  // apply to is resolved from it when needed: at registration the view is not
+  // yet parented to the runner's window.
+  void SetViewWindow(HWND view_window);
 
   // Disallow copy and assign.
   ScreenshotShieldPlugin(const ScreenshotShieldPlugin&) = delete;
@@ -49,7 +51,12 @@ class ScreenshotShieldPlugin : public flutter::Plugin {
  private:
   static bool IsKnownRecorderRunning();
 
-  HWND window_ = nullptr;
+  // The runner's top-level window, or nullptr when there is no view.
+  HWND TopLevelWindow() const;
+
+  HWND view_window_ = nullptr;
+  // The window the sampling timer was set on, so it can be killed.
+  HWND timer_window_ = nullptr;
   bool listening_ = false;
   std::optional<bool> last_state_;
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>

@@ -263,12 +263,14 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     /// Whether the protected view is no longer the content of the field's window.
     private func isStale(contentView: UIView, field: UITextField) -> Bool {
         guard let window = field.window else { return true }
+        // A replaced root (add-to-app, a new root view controller) is stale even though
+        // the old view has already left the window. A full-screen modal keeps the root
+        // view controller and its view, so it is not mistaken for one.
+        if let rootView = window.rootViewController?.view, rootView !== contentView { return true }
         // Away from any window (e.g. covered by a full-screen modal) is not stale: the
         // sentinel re-nests it when it comes back.
         guard let contentWindow = contentView.window else { return false }
-        if contentWindow !== window { return true }
-        if let rootView = window.rootViewController?.view, rootView !== contentView { return true }
-        return false
+        return contentWindow !== window
     }
 
     /// A hidden subview of the protected content view. When UIKit takes the content
@@ -279,8 +281,9 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         if reattachSentinel?.superview === contentView { return }
         reattachSentinel?.removeFromSuperview()
         let sentinel = ReattachSentinelView()
-        sentinel.onReturnToWindow = { [weak self] in
-            // After UIKit finishes re-adding the view.
+        sentinel.onWindowChange = { [weak self] in
+            // After UIKit finishes moving the view: re-nest it if it came back, or notice
+            // that it was replaced as the window's root and protect the new root.
             DispatchQueue.main.async { self?.reassertProtection() }
         }
         contentView.addSubview(sentinel)
@@ -419,7 +422,13 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     private func disableCaptureProtection() {
         reattachSentinel?.removeFromSuperview()
         reattachSentinel = nil
-        if let contentView = protectedContentView {
+        // Only hand the layer back if it is still in our canvas. If UIKit already took the
+        // view away (a replaced root), re-adding its layer would put stale content back on
+        // screen; the canvas view is held strongly, so comparing against it is safe.
+        if let contentView = protectedContentView,
+            let canvasLayer = protectedContainerView?.layer,
+            contentView.layer.superlayer === canvasLayer
+        {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             contentView.layer.removeFromSuperlayer()
@@ -579,9 +588,10 @@ class ScreenRecordingStreamHandler: OnScreenRecordingChangedStreamHandler {
     }
 }
 
-/// Invisible marker that reports when its superview is put back into a window.
+/// Invisible marker that reports when its superview enters or leaves a window.
 final class ReattachSentinelView: UIView {
-    var onReturnToWindow: (() -> Void)?
+    /// Called whenever the protected view enters or leaves a window.
+    var onWindowChange: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: .zero)
@@ -596,8 +606,6 @@ final class ReattachSentinelView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil {
-            onReturnToWindow?()
-        }
+        onWindowChange?()
     }
 }

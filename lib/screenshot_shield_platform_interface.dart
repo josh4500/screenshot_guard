@@ -30,8 +30,8 @@ abstract class ScreenshotShieldPlatform extends PlatformInterface {
 
   /// Emits the screen-recording state whenever it changes.
   ///
-  /// The current state is emitted on first listen. iOS reports `UIScreen.isCaptured`
-  /// (recording or mirroring); Android needs API 35 and never emits below it. Observation
+  /// The current state is emitted on first listen. iOS reports whether the app's scene is
+  /// recorded, mirrored or shared; Android needs API 35 and never emits below it. Observation
   /// is tied to [startListening]/[stopListening].
   Stream<bool> get onScreenRecordingChanged =>
       throw UnsupportedError('onScreenRecordingChanged() has not been implemented.');

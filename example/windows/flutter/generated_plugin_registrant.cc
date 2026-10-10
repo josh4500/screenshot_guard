@@ -6,9 +6,9 @@
 
 #include "generated_plugin_registrant.h"
 
-#include <screenshot_shield/screenshot_shield_plugin.h>
+#include <screenshot_shield/screenshot_shield_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
-  ScreenshotShieldPluginRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("ScreenshotShieldPlugin"));
+  ScreenshotShieldPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("ScreenshotShieldPluginCApi"));
 }

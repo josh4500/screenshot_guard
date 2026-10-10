@@ -23,8 +23,9 @@ class ScreenshotShield {
 
   /// Emits the screen-recording state whenever it changes.
   ///
-  /// The current state is emitted on first listen. On iOS this is `UIScreen.isCaptured`,
-  /// also `true` while mirroring; Android needs API 35 and never emits below it.
+  /// The current state is emitted on first listen. iOS reports whether the app's scene is
+  /// recorded, mirrored (AirPlay) or shared; Android needs API 35 and never emits below
+  /// it; Windows and Linux use a best-effort heuristic that looks for recorder programs.
   Stream<bool> get onScreenRecordingChanged => _platform.onScreenRecordingChanged;
 
   /// Whether the app is currently visible in a screen recording or mirrored screen.
@@ -60,8 +61,10 @@ class ScreenshotShield {
   /// This sets the window's state directly. The guards count their requests instead, so
   /// prevention stays on while any guard needs it; prefer them over calling this yourself.
   ///
-  /// [backgroundBlur] hides the app content in the app switcher: a native blur on iOS and
-  /// Android 12+, a dim overlay below that.
+  /// [backgroundBlur] hides the app's content in the app switcher: on Android 13+ the
+  /// thumbnail is disabled (screenshots and their detection are unaffected), on Android 12
+  /// and below the content is blurred or covered, on iOS it is blurred, and on Windows the
+  /// taskbar and Alt+Tab previews show the app icon instead of the window.
   ///
   /// Omitted flags keep their current value.
   Future<void> setProtection({bool? preventCapture, bool? backgroundBlur}) async {

@@ -108,9 +108,14 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
   /// Minimum time between refreshes of the copy while the region is engaged.
   ///
   /// Each refresh rasterises the subtree and reads it back from the GPU, so this caps
-  /// the cost of regions that repaint often (a blinking caret, an animation). Defaults
+  /// the cost of regions that repaint often (an animation, a ticking value). Defaults
   /// to [defaultRefreshInterval] (about 30 refreshes a second); pass [Duration.zero] to
   /// refresh on every frame in which the subtree repaints.
+  ///
+  /// Refreshes follow repaints of the region's own layer. Content that repaints inside
+  /// a nested repaint boundary of its own - a text field's caret and selection, a
+  /// scrolling list - does not trigger one; call
+  /// [ScreenshotShieldSensitiveViewController.refresh] when such content changes.
   final Duration? refreshInterval;
 
   /// The [refreshInterval] used when none is given.
@@ -453,7 +458,9 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
           'height': image.height,
           'backdropColor': _backdropColor.toARGB32(),
         });
-        if (mounted && !_snapshotReady) {
+        // Only a reply for the current native view counts: a capture still in flight
+        // when the region disengaged must not mark a later engagement as ready.
+        if (mounted && identical(channel, _channel) && !_snapshotReady) {
           setState(() => _snapshotReady = true);
           // The first copy is in; the retry timer has done its job.
           _retryTimer?.cancel();

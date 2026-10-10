@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
@@ -37,6 +39,22 @@ class _HostStatePlatform extends ScreenshotShieldPlatform {
 
   @override
   Future<void> dispose() async {}
+}
+
+/// Like the real channel: the first startListening completes only when [releaseStart]
+/// is called, so guards can be reconfigured or removed while it is in flight.
+class _SlowStartPlatform extends _HostStatePlatform {
+  // Created on first use, inside the test's fake-async zone: a completer created in
+  // setUp belongs to the real zone, and its continuation would never run while pumping.
+  Completer<void>? _start;
+
+  void releaseStart() => (_start ??= Completer<void>()).complete();
+
+  @override
+  Future<void> startListening() async {
+    await (_start ??= Completer<void>()).future;
+    await super.startListening();
+  }
 }
 
 class _TwoGuards extends StatefulWidget {
@@ -128,4 +146,77 @@ void main() {
     expect(platform.listeners, 0);
     expect(platform.protected, isFalse);
   }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  group('while a platform call is in flight', () {
+    late _SlowStartPlatform slow;
+
+    setUp(() {
+      slow = _SlowStartPlatform();
+      shield = ScreenshotShield(platform: slow);
+    });
+
+    testWidgets('a guard removed before listening starts leaves nothing protected', (tester) async {
+      await tester.pumpWidget(
+        ScreenshotShieldScope(
+          shield: shield,
+          child: const ScreenshotShieldGuard(child: SizedBox()),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpWidget(ScreenshotShieldScope(shield: shield, child: const SizedBox()));
+      slow.releaseStart();
+      await tester.pumpAndSettle();
+
+      expect(slow.protected, isFalse);
+      expect(ProtectionClaims.count, 0);
+      expect(slow.listeners, 0);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('a guarded route covered at once by another route is not left protected', (tester) async {
+      final observer = RouteObserver<ModalRoute<void>>();
+      final navigatorKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        ScreenshotShieldScope(
+          shield: shield,
+          routeObserver: observer,
+          child: MaterialApp(
+            navigatorKey: navigatorKey,
+            navigatorObservers: [observer],
+            home: const ScreenshotShieldRouteGuard(child: Text('guarded')),
+          ),
+        ),
+      );
+      // Push over the guarded route before the start reply arrives.
+      navigatorKey.currentState!.push(MaterialPageRoute<void>(builder: (_) => const Text('open')));
+      await tester.pump();
+      slow.releaseStart();
+      await tester.pumpAndSettle();
+      expect(slow.protected, isFalse, reason: 'the guarded route is not in view');
+
+      // Removing the guarded route entirely must not leave anything behind either.
+      navigatorKey.currentState!.pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const Text('home')),
+        (_) => false,
+      );
+      await tester.pumpAndSettle();
+      expect(slow.protected, isFalse);
+      expect(ProtectionClaims.count, 0);
+      expect(slow.listeners, 0);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('a guard reconfigured mid-call ends with its latest settings', (tester) async {
+      Widget guard({required bool preventCapture}) => ScreenshotShieldScope(
+        shield: shield,
+        child: ScreenshotShieldGuard(preventCapture: preventCapture, child: const SizedBox()),
+      );
+      await tester.pumpWidget(guard(preventCapture: false));
+      await tester.pump();
+      await tester.pumpWidget(guard(preventCapture: true));
+      slow.releaseStart();
+      await tester.pumpAndSettle();
+
+      expect(slow.protected, isTrue, reason: 'the guard now asks for prevention');
+      expect(ProtectionClaims.count, 1);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+  });
 }

@@ -36,34 +36,72 @@ abstract final class ProtectionClaims {
 /// What one guard currently holds on its [ScreenshotShield]: a listening slot and a
 /// prevention claim.
 ///
-/// Every change is applied exactly once, so re-applying the same configuration (a
-/// rebuild, a settings change) never adds a second listener or drops a claim the guard
-/// never took.
+/// Requests only record the state the guard wants. A single queue then brings what is
+/// held in line with the *latest* wanted state, one step at a time: platform calls are
+/// asynchronous, so a guard can be reconfigured or disposed while an earlier change is
+/// still in flight, and applying each request's own arguments in turn would leak a
+/// claim (disposed mid-acquire) or drop one that is still wanted.
 class GuardClaims {
+  ScreenshotShield? _wantedShield;
+  bool _wantListen = false;
+  bool _wantProtect = false;
+
   ScreenshotShield? _shield;
   bool _listening = false;
   bool _protecting = false;
 
-  /// Brings the held claims on [shield] to the requested state.
-  Future<void> apply(ScreenshotShield shield, {required bool listen, required bool protect}) async {
-    if (!identical(shield, _shield)) {
-      await release();
-      _shield = shield;
+  Future<void> _queue = Future<void>.value();
+
+  /// Asks to hold exactly [listen] and [protect] on [shield].
+  Future<void> apply(ScreenshotShield shield, {required bool listen, required bool protect}) {
+    _wantedShield = shield;
+    _wantListen = listen;
+    _wantProtect = protect;
+    return _schedule();
+  }
+
+  /// Asks to give back everything this guard holds.
+  Future<void> release() {
+    _wantListen = false;
+    _wantProtect = false;
+    return _schedule();
+  }
+
+  Future<void> _schedule() {
+    final Future<void> step = _queue.then((_) => _reconcile());
+    // A failed platform call must not stall later steps.
+    _queue = step.catchError((Object _) {});
+    return step;
+  }
+
+  /// Applies the latest wanted state; earlier queued steps may already have done so.
+  Future<void> _reconcile() async {
+    if (!identical(_wantedShield, _shield)) {
+      await _giveBack();
+      _shield = _wantedShield;
     }
-    // Flags flip before awaiting so an overlapping call sees the new state.
-    if (listen != _listening) {
-      _listening = listen;
-      await (listen ? shield.startListening() : shield.stopListening());
+    final ScreenshotShield? shield = _shield;
+    if (shield == null) {
+      return;
     }
-    if (protect != _protecting) {
-      _protecting = protect;
-      await (protect ? ProtectionClaims.acquire(shield) : ProtectionClaims.release(shield));
+    if (_wantListen != _listening) {
+      _listening = _wantListen;
+      await (_listening ? shield.startListening() : shield.stopListening());
+    }
+    // Re-read: a request may have arrived while listening changed.
+    if (_wantProtect != _protecting) {
+      _protecting = _wantProtect;
+      await (_protecting ? ProtectionClaims.acquire(shield) : ProtectionClaims.release(shield));
+    }
+    if (_wantListen != _listening || _wantProtect != _protecting) {
+      // Something changed while awaiting; converge before this step completes.
+      await _reconcile();
     }
   }
 
-  /// Gives back everything this guard holds.
-  Future<void> release() async {
-    final shield = _shield;
+  /// Releases what is held on the current shield (used when the shield changes).
+  Future<void> _giveBack() async {
+    final ScreenshotShield? shield = _shield;
     if (shield == null) {
       return;
     }

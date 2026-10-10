@@ -10,7 +10,9 @@ and screen recording, blanks screen captures of a whole screen or of a single se
 region, and hides your app's content in the app switcher.
 
 - **Prevent capture** - screenshots and screen recordings come out blank (Android, iOS,
-  Windows), and so does the app-switcher snapshot (Android, iOS).
+  Windows), and so does the app-switcher snapshot (Android, iOS). On Android, blanking
+  and screenshot detection exclude each other, so the guards detect by default there
+  ([details](#guarding-a-screen)).
 - **Detect screenshots** - get a callback, plus a PNG of the guarded screen to share
   instead of the blanked frame (Android, iOS).
 - **Detect screen recording and mirroring** - a stream and a getter you can react to
@@ -85,7 +87,10 @@ class PaymentScreen extends StatelessWidget {
 ```
 
 While `PaymentScreen` is visible, captures of it come out blank and screenshots are
-reported. When another route covers it, protection and listening are released.
+reported on iOS. On Android a blanked screen cannot report screenshots, so by default the
+guard reports them and does not blank; pass `forcePreventCapture: true` to blank the
+screen there instead (see [Guarding a screen](#guarding-a-screen)). When another route
+covers it, protection and listening are released.
 
 ## Usage
 
@@ -191,8 +196,9 @@ background. While engaged, the subtree stays live and interactive - taps, focus 
 input reach `child` - and a native view nested in a capture-excluded canvas shows a copy
 of it that refreshes when the subtree repaints, about 30 times a second by default
 (`refreshInterval`; `Duration.zero` refreshes on every frame). A capture sees
-`captureColor` instead. `ScreenshotShieldSensitiveViewController.refresh()` refreshes
-on demand.
+`captureColor` instead. Content that repaints inside its own repaint boundary - a text
+field's caret and selection, a scrolling list - does not trigger a refresh; call
+`ScreenshotShieldSensitiveViewController.refresh()` when it changes.
 
 iOS reports a recording slightly after it starts, and the first copy takes a frame or two
 to land, so the first moments of a recording can include the region, and the region can
@@ -301,12 +307,23 @@ one part of the app needs protection.
 | Android | Screenshot detection | Permission |
 |---|---|---|
 | 14+ (API 34) | System `ScreenCaptureCallback`, immediate | `DETECT_SCREEN_CAPTURE` (normal, declared by the plugin) |
-| 10-13 (API 29-33) | Media store observer, shortly after the image is saved | `READ_EXTERNAL_STORAGE` (10-12) or `READ_MEDIA_IMAGES` (13) - declare and request it in your app |
+| 10-13 (API 29-33) | Media store observer, shortly after the image is saved | `READ_EXTERNAL_STORAGE` (10-12) or `READ_MEDIA_IMAGES` (13) - declare (see below) and request it in your app |
 | 7-9 (API 24-28) | Media store observer | `READ_EXTERNAL_STORAGE` - declared by the plugin, request it at runtime |
 
 Without the media permission on Android 10-13, the screenshot (owned by System UI) is
 invisible to your app and no event fires. Only request it if detection on those versions
-matters to you: Google Play asks apps to justify photo permissions.
+matters to you: Google Play asks apps to justify photo permissions. The plugin declares
+`READ_EXTERNAL_STORAGE` only up to Android 9, and the manifest merger applies that limit to
+your declaration too, so override it explicitly:
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+      android:maxSdkVersion="32" tools:replace="android:maxSdkVersion" />
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+</manifest>
+```
 
 On Android 14+ the system shows a notice when an app detects a screenshot. Screenshots
 taken through ADB are not reported. Screen-recording detection needs Android 15 (API 35,
