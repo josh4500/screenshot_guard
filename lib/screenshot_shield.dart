@@ -11,6 +11,9 @@ export 'src/screenshot_shield_sensitive_view.dart' hide RenderScreenshotShieldRe
 /// Screenshot detection is best-effort: Android reports it once the screenshot is
 /// saved, iOS immediately. Screen-recording detection needs iOS or Android 15+.
 class ScreenshotShield {
+  /// Creates a shield backed by the platform implementation.
+  ///
+  /// Pass [platform] to substitute a fake in tests.
   ScreenshotShield({ScreenshotShieldPlatform? platform}) : _platform = platform ?? ScreenshotShieldPlatform.instance;
 
   final ScreenshotShieldPlatform _platform;
@@ -30,10 +33,13 @@ class ScreenshotShield {
   /// mid-recording. `false` until the platform has reported a state.
   bool get isScreenRecording => _platform.isScreenRecording;
 
-  /// Starts observing for screenshots.
+  /// Starts observing for screenshots and screen recordings.
+  ///
+  /// Calls are counted: detection keeps running until [stopListening] has been called
+  /// as many times as this was.
   Future<void> startListening() => _platform.startListening();
 
-  /// Stops observing for screenshots.
+  /// Stops observing, once every [startListening] call has been matched.
   Future<void> stopListening() => _platform.stopListening();
 
   /// Whether whole-window capture prevention is currently enabled.
@@ -46,9 +52,13 @@ class ScreenshotShield {
 
   /// Configures screen protection.
   ///
-  /// [preventCapture] blanks captured frames. On Android a secure window also suppresses
-  /// screenshot detection, so the guards re-rasterise the screen there when detection is
-  /// requested as well.
+  /// [preventCapture] blanks captured frames: screenshots, screen recordings and the
+  /// app-switcher snapshot (Android, iOS and Windows). On Android a secure window also
+  /// suppresses screenshot detection, so the guards keep detection and drop prevention
+  /// there when both are requested.
+  ///
+  /// This sets the window's state directly. The guards count their requests instead, so
+  /// prevention stays on while any guard needs it; prefer them over calling this yourself.
   ///
   /// [backgroundBlur] hides the app content in the app switcher: a native blur on iOS and
   /// Android 12+, a dim overlay below that.
@@ -64,7 +74,6 @@ class ScreenshotShield {
     }
   }
 
-  /// Releases the native resources held by the plugin.
   /// iOS only: keeps the on-screen keyboard out of captures.
   ///
   /// The keyboard is its own system window, so neither whole-window protection nor a
@@ -73,5 +82,6 @@ class ScreenshotShield {
   /// support. No-op on Android, where the keyboard belongs to another app.
   Future<void> setKeyboardProtection({required bool enabled}) => _platform.setKeyboardProtection(enabled: enabled);
 
+  /// Releases the native resources held by the plugin.
   Future<void> dispose() => _platform.dispose();
 }
