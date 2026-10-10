@@ -27,9 +27,31 @@
 * **Guards:** when one of two active guards went away it switched protection off for both,
   and changing a guard's settings while it was active could leak a listener or stop
   detection for another guard. Guards now count their requests.
+* **iOS:** screen-recording detection did not update on recent iOS versions (tested on
+  iOS 27): the plugin now observes the per-scene capture state trait directly.
+* **Region:** fixed a crash (`EXC_BAD_ACCESS`) when a region engaged after UIKit replaced
+  its secure canvas, and a copy that stopped updating (froze) after the region
+  disengaged and re-engaged - for example when Control Center is opened to start a
+  recording.
+* **Region:** a pending throttled refresh made every repaint refresh immediately, so
+  animating regions refreshed on every frame and `refreshInterval` had no effect.
+
+### Behaviour changes
+
+* `ScreenshotShieldSensitiveView.refreshInterval` now defaults to about 30 refreshes a
+  second (`defaultRefreshInterval`); pass `Duration.zero` for the previous every-frame
+  behaviour. Copies are rasterised at no more than 2x (`maxCopyPixelRatio`), which more
+  than halves the per-refresh cost on 3x devices.
+* `backdropColor` now defaults to transparent instead of the Material theme's scaffold
+  colour, so the widget no longer depends on a `Theme`. Set it when the child has
+  see-through parts such as rounded corners.
 
 ### Other changes
 
+* Add `ScreenshotShieldSensitiveView.capturePlaceholder`: any widget to show captures in
+  place of the region - a shape matching the content, a message, or a blur - instead of
+  a solid `captureColor`.
+* The example gains an animating region with a refresh-rate switch and a placeholder.
 * The README is reorganised around a feature list, a platform support table and a quick
   start, and documents the Android media permission needed on Android 10-13 and the
   permissions the plugin merges into the app.

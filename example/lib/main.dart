@@ -359,10 +359,27 @@ class _SecondScreenState extends State<SecondScreen> {
           ScreenshotShieldSensitiveView(
             protection: _protection,
             refreshInterval: _animationRefresh,
-            captureColor: Colors.black,
             // The card has rounded corners: show the page colour behind them while
-            // the region is engaged, instead of captureColor.
+            // the region is engaged.
             backdropColor: Theme.of(context).colorScheme.surface,
+            // What screenshots and recordings show instead of the card: a rounded
+            // box with a lock, matching the card's shape.
+            capturePlaceholder: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock, color: Colors.white70),
+                    SizedBox(width: 8),
+                    Text('Hidden', style: TextStyle(color: Colors.white70)),
+                  ],
+                ),
+              ),
+            ),
             child: const _AnimatedBalanceCard(),
           ),
           const SizedBox(height: 24),

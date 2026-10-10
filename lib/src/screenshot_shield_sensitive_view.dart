@@ -40,6 +40,7 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
     super.key,
     required this.child,
     this.captureColor,
+    this.capturePlaceholder,
     this.backdropColor,
     this.protection = SensitiveProtection.whileCaptured,
     this.refreshInterval,
@@ -60,6 +61,35 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
   /// never sees it (the canvas covers it with the copy over [backdropColor]); a
   /// capture does, because the excluded canvas contributes nothing to it.
   final Color? captureColor;
+
+  /// What a capture shows in place of the region, instead of a solid [captureColor].
+  ///
+  /// It is laid out at the region's size and painted beneath the capture-excluded copy,
+  /// so the user never sees it - only screenshots and recordings do. It appears once the
+  /// first copy is in place. Use it for a shape that matches the content, a message, or
+  /// a blur of the content:
+  ///
+  /// ```dart
+  /// // A rounded box with a lock, matching a rounded card.
+  /// capturePlaceholder: DecoratedBox(
+  ///   decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(16)),
+  ///   child: const Center(child: Icon(Icons.lock, color: Colors.white)),
+  /// ),
+  ///
+  /// // A blur of the content (captures see a blurred version of it).
+  /// capturePlaceholder: ClipRRect(
+  ///   borderRadius: BorderRadius.circular(16),
+  ///   child: BackdropFilter(
+  ///     filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+  ///     child: const ColoredBox(color: Color(0x33000000)),
+  ///   ),
+  /// ),
+  /// ```
+  ///
+  /// Whatever it leaves uncovered or translucent shows the live content to captures, so
+  /// keep it opaque over anything sensitive unless partial exposure (such as a blur) is
+  /// what you want. It never receives pointer events or contributes semantics.
+  final Widget? capturePlaceholder;
 
   /// What the user sees behind the copy where [child] is transparent, while the region
   /// is engaged. Defaults to transparent.
@@ -449,12 +479,13 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
       return widget.child;
     }
     final bool engaged = _engaged;
+    final Widget? placeholder = widget.capturePlaceholder;
     return ScreenshotShieldRegionLayout(
       // Nothing covers the live subtree until the first copy lands, so the region never
       // flashes on screen. A capture can see it for that frame or two - on top of the
       // delay before iOS reports a recording at all; `SensitiveProtection.always` keeps
       // the copy in place permanently for regions that cannot afford either.
-      captureColor: engaged && _snapshotReady ? _captureColor : null,
+      captureColor: engaged && _snapshotReady && placeholder == null ? _captureColor : null,
       onSubtreeSizeChanged: scheduleRefresh,
       children: <Widget>[
         // Same position in the element tree whether or not the region is engaged.
@@ -462,14 +493,25 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
           key: _boundaryKey,
           child: _RepaintNotifier(onPaint: _handleSubtreePainted, child: widget.child),
         ),
-        // What the user sees while engaged: the copy painted over the backdrop.
+        // While engaged: what captures see (the placeholder), and on top of it what the
+        // user sees (the copy, in the native view). The view keeps the same position in
+        // the tree whether or not there is a placeholder, so it is never recreated.
         if (engaged)
-          UiKitView(
-            viewType: _viewType,
-            creationParams: <String, dynamic>{'enabled': true},
-            creationParamsCodec: const StandardMessageCodec(),
-            hitTestBehavior: .transparent,
-            onPlatformViewCreated: _handlePlatformViewCreated,
+          Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              if (placeholder != null && _snapshotReady)
+                IgnorePointer(child: ExcludeSemantics(child: placeholder))
+              else
+                const SizedBox.shrink(),
+              UiKitView(
+                viewType: _viewType,
+                creationParams: <String, dynamic>{'enabled': true},
+                creationParamsCodec: const StandardMessageCodec(),
+                hitTestBehavior: .transparent,
+                onPlatformViewCreated: _handlePlatformViewCreated,
+              ),
+            ],
           ),
       ],
     );

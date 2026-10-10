@@ -150,6 +150,34 @@ ScreenshotShieldSensitiveView(
 )
 ```
 
+To show captures something other than a solid colour - a shape matching the content, a
+message, or a blur of the content - pass a `capturePlaceholder`. It is sized to the region
+and drawn beneath the copy, so only screenshots and recordings see it:
+
+```dart
+ScreenshotShieldSensitiveView(
+  backdropColor: Theme.of(context).colorScheme.surface,
+  // A rounded box with a lock, matching a rounded card.
+  capturePlaceholder: DecoratedBox(
+    decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(16)),
+    child: const Center(child: Icon(Icons.lock, color: Colors.white70)),
+  ),
+  child: const BalanceCard(),
+)
+
+// Or a blur of the content (captures see a blurred version of it):
+capturePlaceholder: ClipRRect(
+  borderRadius: BorderRadius.circular(16),
+  child: BackdropFilter(
+    filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+    child: const ColoredBox(color: Color(0x33000000)),
+  ),
+),
+```
+
+Anything the placeholder leaves uncovered or translucent shows the live content to
+captures, so keep it opaque over sensitive content unless a blur is what you want.
+
 | `protection` | Covers | Cost |
 |---|---|---|
 | `SensitiveProtection.whileRecording` | screen recordings and mirroring | none while not recording |
@@ -167,9 +195,10 @@ of it that refreshes when the subtree repaints, about 30 times a second by defau
 on demand.
 
 iOS reports a recording slightly after it starts, and the first copy takes a frame or two
-to land, so the first moments of a recording can include the region. Use
-`protection: SensitiveProtection.always` for content that must never appear, at the cost
-below.
+to land, so the first moments of a recording can include the region, and the region can
+flash briefly on screen as it engages. Use `protection: SensitiveProtection.always` for
+content that must never appear (the copy is then already in place when a recording
+starts), at the cost below.
 
 `protection: SensitiveProtection.always` keeps the region engaged permanently, which also
 blanks foreground screenshots, at these costs:
