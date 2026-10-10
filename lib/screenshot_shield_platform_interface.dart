@@ -58,7 +58,7 @@ abstract class ScreenshotShieldPlatform extends PlatformInterface {
   /// Stops observing for screenshots.
   Future<void> stopListening() => throw UnsupportedError('stopListening() has not been implemented.');
 
-  /// Prevents screen capture on Android. No-op on iOS.
+  /// Blanks screen captures of the app window while [protected] is `true`.
   Future<void> setProtected({required bool protected}) =>
       throw UnsupportedError('setProtected() has not been implemented.');
 

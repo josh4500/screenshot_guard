@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
+import 'package:screenshot_shield/src/screenshot_shield_claims.dart';
 import 'package:screenshot_shield/src/screenshot_shield_guard_config.dart';
 
 /// Scopes screenshot protection to the route it lives on.
@@ -58,6 +59,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   RouteObserver<ModalRoute<void>>? _routeObserver;
   Route<dynamic>? _registeredRoute;
   final GlobalKey _boundaryKey = GlobalKey();
+  final GuardClaims _claims = GuardClaims();
   bool _inView = false;
 
   /// Whether prevention applies; see [preventCapture] for the Android conflict.
@@ -143,26 +145,20 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   @override
   void didUpdateWidget(ScreenshotShieldRouteGuard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.preventCapture != widget.preventCapture || oldWidget.detectScreenshots != widget.detectScreenshots) {
+    if (oldWidget.preventCapture != widget.preventCapture ||
+        oldWidget.detectScreenshots != widget.detectScreenshots ||
+        oldWidget.forcePreventCapture != widget.forcePreventCapture) {
       if (_inView) {
-        unawaited(_resync());
+        unawaited(_sync());
       }
     }
   }
 
-  Future<void> _resync() async {
-    if (!_inView) return;
-    final shield = _shield!;
-    if (widget.detectScreenshots) {
-      await shield.startListening();
-    } else {
-      await shield.stopListening();
-    }
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: true);
-    } else {
-      await shield.setProtection(preventCapture: false);
-    }
+  /// Applies the current configuration to the claims this guard holds.
+  Future<void> _sync() async {
+    final shield = _shield;
+    if (!_inView || shield == null) return;
+    await _claims.apply(shield, listen: widget.detectScreenshots, protect: _shouldPrevent);
   }
 
   Future<Uint8List?> _captureChild() async {
@@ -229,24 +225,12 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   Future<void> _enterView() async {
     if (_inView) return;
     _inView = true;
-    final shield = _shield!;
-    if (widget.detectScreenshots) {
-      await shield.startListening();
-    }
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: true);
-    }
+    await _sync();
   }
 
   Future<void> _leaveView() async {
     if (!_inView) return;
     _inView = false;
-    final shield = _shield!;
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: false);
-    }
-    if (widget.detectScreenshots) {
-      await shield.stopListening();
-    }
+    await _claims.release();
   }
 }

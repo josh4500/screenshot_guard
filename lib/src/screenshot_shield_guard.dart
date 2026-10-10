@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
+import 'package:screenshot_shield/src/screenshot_shield_claims.dart';
 import 'package:screenshot_shield/src/screenshot_shield_guard_config.dart';
 
 /// Guards its subtree against screen capture while [active] is `true`.
@@ -58,6 +59,7 @@ class _ScreenshotShieldGuardState extends State<ScreenshotShieldGuard> {
   ScreenshotShield? _shield;
   StreamSubscription<void>? _screenshotSubscription;
   final GlobalKey _boundaryKey = GlobalKey();
+  final GuardClaims _claims = GuardClaims();
   bool _active = false;
 
   /// Whether prevention applies; see [preventCapture] for the Android conflict.
@@ -95,69 +97,19 @@ class _ScreenshotShieldGuardState extends State<ScreenshotShieldGuard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active != widget.active ||
         oldWidget.preventCapture != widget.preventCapture ||
-        oldWidget.detectScreenshots != widget.detectScreenshots) {
+        oldWidget.detectScreenshots != widget.detectScreenshots ||
+        oldWidget.forcePreventCapture != widget.forcePreventCapture) {
       unawaited(_syncActivation());
     }
   }
 
   Future<void> _syncActivation() async {
-    if (!mounted || _shield == null) {
+    final shield = _shield;
+    if (!mounted || shield == null) {
       return;
     }
-    if (widget.active) {
-      if (_active) {
-        await _resync();
-      } else {
-        await _enter();
-      }
-    } else if (_active) {
-      await _leave();
-    }
-  }
-
-  Future<void> _enter() async {
-    if (_active) {
-      return;
-    }
-    _active = true;
-    final shield = _shield!;
-    if (widget.detectScreenshots) {
-      await shield.startListening();
-    }
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: true);
-    }
-  }
-
-  Future<void> _leave() async {
-    if (!_active) {
-      return;
-    }
-    _active = false;
-    final shield = _shield!;
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: false);
-    }
-    if (widget.detectScreenshots) {
-      await shield.stopListening();
-    }
-  }
-
-  Future<void> _resync() async {
-    if (!_active) {
-      return;
-    }
-    final shield = _shield!;
-    if (widget.detectScreenshots) {
-      await shield.startListening();
-    } else {
-      await shield.stopListening();
-    }
-    if (_shouldPrevent) {
-      await shield.setProtection(preventCapture: true);
-    } else {
-      await shield.setProtection(preventCapture: false);
-    }
+    _active = widget.active;
+    await _claims.apply(shield, listen: _active && widget.detectScreenshots, protect: _active && _shouldPrevent);
   }
 
   Future<Uint8List?> _captureChild() async {
@@ -181,7 +133,8 @@ class _ScreenshotShieldGuardState extends State<ScreenshotShieldGuard> {
   @override
   void dispose() {
     _screenshotSubscription?.cancel();
-    unawaited(_leave());
+    _active = false;
+    unawaited(_claims.release());
     super.dispose();
   }
 
