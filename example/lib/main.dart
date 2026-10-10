@@ -206,6 +206,7 @@ class _SecondScreenState extends State<SecondScreen> {
   Timer? _ticker;
   int _seconds = 0;
   SensitiveProtection _protection = SensitiveProtection.whileCaptured;
+  bool _obscureKeyboard = false;
 
   @override
   void initState() {
@@ -228,6 +229,7 @@ class _SecondScreenState extends State<SecondScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final ScreenshotShield shield = ScreenshotShieldScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Region shielding')),
       body: ListView(
@@ -320,6 +322,45 @@ class _SecondScreenState extends State<SecondScreen> {
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 24),
+          const _SectionLabel('Keyboard'),
+          const Text(
+            'The keyboard is a separate system window, so neither a guarded screen '
+            'nor a region covers it by itself. Focus each field below and take a '
+            'screenshot: if the keyboard is missing for one of them, this platform '
+            'already hides it for secure input.',
+          ),
+          const SizedBox(height: 8),
+          const TextField(
+            decoration: InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Normal field',
+              helperText: 'Is the keyboard in the screenshot?',
+            ),
+          ),
+          const SizedBox(height: 12),
+          const TextField(
+            obscureText: true,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Secure field (obscureText)',
+              helperText: 'Is the keyboard in the screenshot?',
+            ),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('Obscure the keyboard in captures'),
+            subtitle: const Text(
+              'iOS only: keeps the keyboard usable on screen while captures get '
+              'none of its pixels. Android cannot do this - the keyboard belongs to '
+              'another app - so the call is a no-op there.',
+            ),
+            value: _obscureKeyboard,
+            onChanged: (bool value) {
+              setState(() => _obscureKeyboard = value);
+              shield.setKeyboardProtection(enabled: value);
+            },
           ),
           const SizedBox(height: 24),
           const Text(

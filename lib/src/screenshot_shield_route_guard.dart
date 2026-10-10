@@ -7,26 +7,9 @@ import 'package:flutter/widgets.dart';
 import 'package:screenshot_shield/screenshot_shield.dart';
 import 'package:screenshot_shield/src/screenshot_shield_guard_config.dart';
 
-/// A widget that scopes screenshot protection to the route it lives on.
+/// Scopes screenshot protection to the route it lives on.
 ///
-/// While the enclosing [ModalRoute] is the top-most route this guard starts
-/// listening for screenshots and (optionally) prevents capture. When another
-/// route is pushed on top the protection is released and listening stops, and
-/// both resume automatically when this route becomes visible again.
-///
-/// With [captureOnScreenshot] enabled the guarded subtree is wrapped in a
-/// [RepaintBoundary], and each detected screenshot is re-rasterized into a PNG
-/// that is passed to [onScreenshotDetected]. This captures the app's own
-/// content rather than the OS screenshot, so it works even on platforms or
-/// screens where the OS frame is blanked or unavailable.
-///
-/// Only one [ScreenshotShieldRouteGuard] may be mounted per route; mounting a
-/// second one on the same route reports an error and is left inactive.
-///
-/// The [ScreenshotShield] and the [RouteObserver] are read from the nearest
-/// [ScreenshotShieldScope]. The scope's [ScreenshotShieldScope.routeObserver]
-/// must be registered with the enclosing `Navigator`, e.g. via
-/// `MaterialApp(navigatorObservers: [routeObserver])`.
+/// Active while this route is top-most; one guard per route.
 class ScreenshotShieldRouteGuard extends StatefulWidget {
   const ScreenshotShieldRouteGuard({
     super.key,
@@ -42,31 +25,25 @@ class ScreenshotShieldRouteGuard extends StatefulWidget {
   final Widget child;
 
   /// Whether capture prevention is enabled while the route is in view. On
-  /// Android this blanks the captured frame via the secure window flag, but
-  /// that flag also suppresses screenshot detection, so on Android detection
-  /// wins when [detectScreenshots] is also enabled. Defaults to `true`.
+  /// Android the secure flag also suppresses detection, so detection wins when
+  /// [detectScreenshots] is enabled too. Defaults to `true`.
   final bool preventCapture;
 
   /// Whether the guard listens for screenshots while the route is in view.
   /// Defaults to `true`.
   final bool detectScreenshots;
 
-  /// Whether capture prevention should win over screenshot detection on
-  /// Android when both are requested. On Android the secure window flag
-  /// suppresses detection, so forcing prevention means [onScreenshotDetected]
-  /// will not fire while this route is in view. Defaults to `false`.
+  /// Whether capture prevention wins over detection on Android. Forcing it
+  /// means [onScreenshotDetected] will not fire while the route is in view.
+  /// Defaults to `false`.
   final bool forcePreventCapture;
 
-  /// Whether the guarded subtree is re-rasterized into a PNG when a screenshot
-  /// is detected. The PNG bytes are passed to [onScreenshotDetected]; set to
-  /// `false` to skip the capture overhead. Defaults to `true`.
+  /// Whether the guarded subtree is re-rasterized into a PNG on detection, at
+  /// extra cost. The bytes go to [onScreenshotDetected]. Defaults to `true`.
   final bool captureOnScreenshot;
 
-  /// Invoked each time a screenshot is captured while the route is in view.
-  ///
-  /// The argument is a PNG-encoded image of the guarded subtree when
-  /// [captureOnScreenshot] is enabled, or `null` if the capture was skipped or
-  /// failed. Use it to show the user a shareable copy of the screen.
+  /// Called with a PNG of the guarded subtree, or `null` if capture was
+  /// skipped or failed. Fires each time a screenshot is captured.
   final ValueChanged<Uint8List?>? onScreenshotDetected;
 
   @override
@@ -83,8 +60,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
   final GlobalKey _boundaryKey = GlobalKey();
   bool _inView = false;
 
-  /// Whether capture prevention should be applied, accounting for the Android
-  /// conflict where the secure window flag suppresses screenshot detection.
+  /// Whether prevention applies; see [preventCapture] for the Android conflict.
   bool get _shouldPrevent => shouldPreventCapture(
     preventCapture: widget.preventCapture,
     detectScreenshots: widget.detectScreenshots,
@@ -115,8 +91,7 @@ class _ScreenshotShieldRouteGuardState extends State<ScreenshotShieldRouteGuard>
     }
   }
 
-  /// Registers this guard on [route], reporting an error and returning `false`
-  /// if another guard is already mounted on the same route.
+  /// Registers this guard on [route]; reports an error if it is already guarded.
   bool _registerRoute(Route<dynamic> route) {
     if (route == _registeredRoute) {
       return true;

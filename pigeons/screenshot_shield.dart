@@ -19,6 +19,10 @@ abstract class ScreenshotShieldHostApi {
   void setProtected(bool protected);
 
   void setBackgroundBlur(bool blurEnabled);
+
+  /// iOS only: keeps the on-screen keyboard out of captures by nesting the
+  /// keyboard window's content in a capture-excluded canvas. No-op elsewhere.
+  void setKeyboardProtected(bool enabled);
 }
 
 /// Events emitted from the host platform into Dart.

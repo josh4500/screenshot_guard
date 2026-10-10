@@ -9,15 +9,10 @@ import android.provider.MediaStore
 import android.util.Log
 
 /**
- * Observes the media store for newly saved screenshots.
- *
- * Media store notifications can carry a collection, volume or row URI depending
- * on the Android version and OEM, so instead of trusting the delivered URI we
- * query for the most recent image and test its name/path against screenshot
- * keywords. Only images added in the last few seconds are considered, which
- * avoids false positives from older screenshots still present in the store.
- * Events are debounced because a single screenshot can notify the observer
- * several times.
+ * Observes the media store for newly saved screenshots. The delivered URI varies by
+ * Android version and OEM, so the most recent image is queried and its name/path
+ * tested against screenshot keywords; only recent images count, and events are
+ * debounced because one screenshot can notify several times.
  */
 internal class ScreenshotContentObserver(
     private val contentResolver: ContentResolver,

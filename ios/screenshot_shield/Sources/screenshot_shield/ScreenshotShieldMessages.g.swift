@@ -105,6 +105,9 @@ protocol ScreenshotShieldHostApi {
   func stopListening() throws
   func setProtected(protected: Bool) throws
   func setBackgroundBlur(blurEnabled: Bool) throws
+  /// iOS only: keeps the on-screen keyboard out of captures by nesting the
+  /// keyboard window's content in a capture-excluded canvas. No-op elsewhere.
+  func setKeyboardProtected(enabled: Bool) throws
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -168,6 +171,23 @@ class ScreenshotShieldHostApiSetup {
       }
     } else {
       setBackgroundBlurChannel.setMessageHandler(nil)
+    }
+    /// iOS only: keeps the on-screen keyboard out of captures by nesting the
+    /// keyboard window's content in a capture-excluded canvas. No-op elsewhere.
+    let setKeyboardProtectedChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setKeyboardProtected\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      setKeyboardProtectedChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let enabledArg = args[0] as! Bool
+        do {
+          try api.setKeyboardProtected(enabled: enabledArg)
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      setKeyboardProtectedChannel.setMessageHandler(nil)
     }
   }
 }

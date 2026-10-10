@@ -3,6 +3,26 @@
 Detects user screenshots and screen recording, and optionally prevents screen
 capture, on Android and iOS.
 
+### The keyboard
+
+The keyboard is a window of its own, so neither whole-window protection nor a
+sensitive region covers it - a capture of a screen with the keyboard up shows the
+keys.
+
+* **iOS**: `ScreenshotShield.setKeyboardProtection(enabled: true)` keeps the
+  keyboard usable on screen while nesting the keyboard window's content in the same
+  capture-excluded canvas the region uses, so captures get no keyboard pixels. It
+  relies on undocumented UIKit behaviour, so verify it on the iOS versions you
+  support.
+* **Android**: the keyboard belongs to another application (the IME) and cannot be
+  excluded from a capture at all - the call is accepted and ignored. Keep sensitive
+  input inside your app instead: an in-app keypad is ordinary Flutter content, so
+  `ScreenshotShieldSensitiveView` and the guards cover it like anything else. Hiding
+  the keyboard while the screen is recorded (`TextInput.hide` while
+  `ScreenshotShield.onScreenRecordingChanged` is `true`) is the other option, at the
+  cost of the user not being able to type.
+
+
 ## Platform behaviour
 
 Screenshot and screen-recording detection are best-effort and

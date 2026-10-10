@@ -12,13 +12,10 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 
 /**
- * Hides the content of an [Activity] while it is backgrounded.
- *
- * A true blur via [RenderEffect] (Android 12+) only affects content that is
- * part of the view hierarchy. Flutter renders to a [SurfaceView] by default,
- * which draws on a separate surface that a parent blur cannot reach, so the
- * blur is only applied when the window contains a [TextureView] (e.g. a
- * FlutterActivity using `RenderMode.texture`). Otherwise a dim overlay is shown.
+ * Hides an [Activity]'s content while backgrounded. A [RenderEffect] blur (Android
+ * 12+) reaches only the view hierarchy, so it is applied only when the window has a
+ * [TextureView]; Flutter's default [SurfaceView] draws on a separate surface a
+ * parent blur cannot touch and gets a dim overlay instead.
  */
 internal class ScreenBlurController(private val context: Context) {
 

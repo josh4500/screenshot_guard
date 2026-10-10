@@ -1,3 +1,18 @@
+## 0.1.11
+
+* Add `ScreenshotShield.setKeyboardProtection(enabled:)` (iOS): the on-screen
+  keyboard is a private window of its own, so it survived both whole-window
+  protection and a sensitive region and was visible in captures. The plugin now
+  nests the keyboard window's content in the same capture-excluded canvas used for
+  regions while this is enabled, re-installing it whenever a keyboard window appears
+  or is rebuilt, and retiring the canvas safely (the same deferred release the app
+  window needs, since `CALayer.delegate` is `unowned(unsafe)`). Undocumented UIKit
+  behaviour: verify on the iOS versions you support. On Android the keyboard belongs
+  to another application and cannot be excluded, so the call is a no-op there and
+  the README documents the alternatives.
+* The example gained a keyboard section (a normal and a secure field) and a switch
+  for this, so it can be compared on a device.
+
 ## 0.1.10
 
 * Add `SensitiveProtection.whileRecording` to `ScreenshotShieldSensitiveView`: the

@@ -118,6 +118,22 @@ class ScreenshotShieldHostApi {
 
     _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
   }
+
+  /// iOS only: keeps the on-screen keyboard out of captures by nesting the
+  /// keyboard window's content in a capture-excluded canvas. No-op elsewhere.
+  Future<void> setKeyboardProtected(bool enabled) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setKeyboardProtected$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[enabled]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
+  }
 }
 
 /// Events emitted from the host platform into Dart.

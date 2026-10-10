@@ -21,13 +21,10 @@ import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
 import io.flutter.plugin.common.PluginRegistry
 
 /**
- * Detects user screenshots, optionally prevents screen capture, and can blur
- * the app content while the app is in the background.
- *
- * On Android 14+ (API 34) the framework `DETECT_SCREEN_CAPTURE` API is used
- * when the activity is started; on older devices the media store is observed
- * while the activity is started. Background blur uses `RenderEffect` on
- * Android 12+ and a dim overlay below that.
+ * Detects user screenshots, optionally prevents capture, and blurs the app content
+ * while backgrounded. Android 14+ uses `DETECT_SCREEN_CAPTURE`; older devices
+ * observe the media store. Blur uses `RenderEffect` on Android 12+ and a dim
+ * overlay below that.
  */
 class ScreenshotShieldPlugin :
     FlutterPlugin,
@@ -72,14 +69,12 @@ class ScreenshotShieldPlugin :
         activityBinding = binding
         activity = binding.activity
         lifecycle = (binding.lifecycle as? HiddenLifecycleReference)?.lifecycle
-        // If the lifecycle is unavailable (e.g. a custom activity embedding that
-        // does not expose one), fall back to treating the activity as started so
-        // screenshot detection can still be registered.
+        // No lifecycle exposed (a custom activity embedding): treat the activity as
+        // started so screenshot detection can still be registered.
         if (lifecycle == null) {
             activityStarted = true
         }
-        // Fires before onPause when the user leaves the app (home/recents/back),
-        // so the blur is applied before the recents thumbnail is captured.
+        // Fires before onPause, so the blur lands before the recents thumbnail.
         val userLeaveHintListener = PluginRegistry.UserLeaveHintListener {
             applyBackgroundBlur()
         }
@@ -158,6 +153,11 @@ class ScreenshotShieldPlugin :
         }
     }
 
+    override fun setKeyboardProtected(enabled: Boolean) {
+        // The IME is another app's window and cannot be excluded from captures at
+        // all, so this only accepts the call; keep sensitive input inside the app.
+    }
+
     override fun setBackgroundBlur(blurEnabled: Boolean) {
         backgroundBlurEnabled = blurEnabled
         if (backgrounded) {
@@ -191,8 +191,7 @@ class ScreenshotShieldPlugin :
                 decorView.requestLayout()
             }
         }
-        // Commit the blur into the next frame before the recents thumbnail is
-        // captured (the Android analog of the iOS CATransaction.flush).
+        // Commit the blur before the recents thumbnail is captured.
         decorView.invalidate()
     }
 
@@ -237,11 +236,7 @@ class ScreenshotShieldPlugin :
         screenCaptureCallback = null
     }
 
-    /**
-     * Registers for screen recording state changes on Android 15 (API 35) and
-     * newer. Older versions have no public detection API, so nothing is
-     * registered and the event stream never emits.
-     */
+    /** Screen recording changes on Android 15+; older versions have no public API. */
     private fun updateScreenRecordingCallback() {
         val currentActivity = activity
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&

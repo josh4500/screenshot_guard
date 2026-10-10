@@ -9,11 +9,15 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     private var secureTextField: UITextField?
     private var protectedContentView: UIView?
     private weak var protectedContentSuperlayer: CALayer?
-    // Held as the canvas *view* rather than its layer: the canvas layer's
-    // `delegate` is that view and is `unowned(unsafe)`, so a layer kept alive on
-    // its own can outlive the view and be left with a dangling delegate (see
-    // SecureCanvas.containerView(of:)).
+    // Held as the canvas *view*: the canvas layer's `delegate` is `unowned(unsafe)`,
+    // so a layer kept alive on its own can outlive the view and crash in `objc_retain`.
     private var protectedContainerView: UIView?
+    private var keyboardProtectionEnabled = false
+    private var keyboardObserverTokens: [NSObjectProtocol] = []
+    private var keyboardSecureTextField: UITextField?
+    private var keyboardProtectedContentView: UIView?
+    private var keyboardProtectedSuperlayer: CALayer?
+    private var keyboardProtectedContainerView: UIView?
     private var backgroundBlurEnabled = false
     private var backgroundBlurView: UIVisualEffectView?
     private var backgroundObserverTokens: [NSObjectProtocol] = []
@@ -54,8 +58,7 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
                 self?.emitScreenRecordingState()
             }
         }
-        // Report the state at the moment listening starts; the notification only
-        // fires on subsequent changes.
+        // Report the current state now; the notification only fires on changes.
         emitScreenRecordingState()
     }
 
@@ -76,9 +79,8 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         screenRecordingStreamHandler.emitScreenRecordingChanged(isScreenRecording)
     }
 
-    /// `UIScreen.isCaptured` covers screen recording and screen mirroring. The
-    /// simulator always reports `true`, so it is treated as not captured to
-    /// avoid false positives during development.
+    /// `UIScreen.isCaptured` covers screen recording and mirroring. The simulator
+    /// always reports `true`, so it is treated as not captured.
     private var isScreenRecording: Bool {
         #if targetEnvironment(simulator)
             return false
@@ -97,30 +99,16 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
 
     // MARK: - Capture protection
 
-    /// Blanks screenshots and screen recordings of the app.
+    /// Blanks screenshots and recordings of the app.
     ///
-    /// iOS has no public API for this. The workaround is a `UITextField` with
-    /// `isSecureTextEntry` enabled: UIKit renders such a field through a
-    /// private, capture-excluded canvas layer (see [SecureCanvas]). The canvas
-    /// only protects its own content, so the app's content layer is re-parented
-    /// into it. Simply adding a secure field as a sibling subview - which this
-    /// plugin used to do - protects nothing but the (empty) field itself, so
-    /// screenshots still show the app.
-    ///
-    /// The field is sized to the window and inserted at origin (0, 0) so the
-    /// canvas layer's coordinate space matches the window's. That keeps the
-    /// content layer's frame valid across the move and lets UIKit keep applying
-    /// `view.frame` updates without shifting the content.
+    /// iOS has no public API: a secure `UITextField` supplies the private
+    /// capture-excluded canvas layer, and the app's content layer is re-parented
+    /// into it (a sibling field only protects itself). The field is sized to the
+    /// window at origin so canvas coordinates and the content frame stay valid.
     private func enableCaptureProtection() {
         if let contentView = protectedContentView, let field = secureTextField {
-            // Re-assert the nesting: UIKit can rebuild the window's layer tree
-            // (for example while returning from the background), which moves the
-            // content layer back under the window and silently disables the
-            // protection. The guards call this again whenever a guarded screen
-            // becomes active.
-            //
-            // The canvas is re-resolved first, because UIKit can also rebuild the
-            // field's private canvas while the field itself stays alive.
+            // Re-assert the nesting: UIKit can rebuild the window's layer tree (e.g.
+            // on return from background) and silently undo it; re-resolve the canvas too.
             guard let canvasView = SecureCanvas.containerView(of: field) else {
                 SecureCanvas.log("capture protection re-assert deferred: no secure canvas view")
                 return
@@ -168,8 +156,126 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         )
     }
 
-    /// Moves [contentLayer] into the capture-excluded [canvas], without an
-    /// implicit animation: this can run inside UIKit's own layout passes.
+    // MARK: - Keyboard protection (iOS only)
+
+    /// Keeps the on-screen keyboard out of captures. The keyboard is its own private
+    /// window, so window protection and sensitive regions never reach it; its content
+    /// is nested in a canvas the same way. Best effort: re-installed when a keyboard
+    /// window appears or changes frame.
+    public func setKeyboardProtected(enabled: Bool) throws {
+        keyboardProtectionEnabled = enabled
+        if enabled {
+            installKeyboardObservers()
+            protectKeyboardWindow()
+        } else {
+            removeKeyboardObservers()
+            unprotectKeyboardWindow()
+        }
+    }
+
+    private func installKeyboardObservers() {
+        guard keyboardObserverTokens.isEmpty else { return }
+        // `keyboardWillHide` matters most: the layer tree has to be handed back to
+        // UIKit *before* it dismantles the keyboard window, or the move crashes.
+        let protect: [Notification.Name] = [
+            UIWindow.didBecomeVisibleNotification,
+            UIResponder.keyboardDidShowNotification,
+            UIResponder.keyboardDidChangeFrameNotification,
+        ]
+        let restore: [Notification.Name] = [UIResponder.keyboardWillHideNotification]
+        keyboardObserverTokens = protect.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.protectKeyboardWindow()
+            }
+        }
+        keyboardObserverTokens += restore.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.unprotectKeyboardWindow()
+            }
+        }
+    }
+
+    private func removeKeyboardObservers() {
+        for token in keyboardObserverTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
+        keyboardObserverTokens = []
+    }
+
+    private func protectKeyboardWindow() {
+        guard keyboardProtectionEnabled else { return }
+        guard let window = Self.keyboardWindow() else { return }
+        // Only touch a window UIKit identifies as a keyboard, and only when visible.
+        guard NSStringFromClass(type(of: window)).lowercased().contains("keyboard") else { return }
+        guard !window.isHidden, window.alpha > 0 else { return }
+        guard let contentView = window.rootViewController?.view ?? window.subviews.first else { return }
+        // Rebuilt keyboards replace the window's content view; re-install.
+        if keyboardProtectedContentView === contentView {
+            return
+        }
+        unprotectKeyboardWindow()
+
+        let field = SecureCanvas.makeField(frame: window.bounds)
+        field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.insertSubview(field, at: 0)
+        window.layoutIfNeeded()
+        field.layoutIfNeeded()
+
+        guard let canvasView = SecureCanvas.containerView(of: field) else {
+            field.removeFromSuperview()
+            SecureCanvas.log("keyboard protection failed: no secure canvas view on the text field")
+            return
+        }
+
+        let originalSuperlayer = contentView.layer.superlayer
+        nest(contentLayer: contentView.layer, in: canvasView.layer, frame: contentView.frame)
+
+        keyboardSecureTextField = field
+        keyboardProtectedContentView = contentView
+        keyboardProtectedSuperlayer = originalSuperlayer
+        keyboardProtectedContainerView = canvasView
+        SecureCanvas.log(
+            "keyboard protection enabled: \(type(of: contentView)) layer nested in "
+                + "\(NSStringFromClass(type(of: canvasView)))"
+        )
+    }
+
+    private func unprotectKeyboardWindow() {
+        if let contentView = keyboardProtectedContentView {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            contentView.layer.removeFromSuperlayer()
+            let parent = keyboardProtectedSuperlayer ?? Self.keyboardWindow()?.layer
+            parent?.addSublayer(contentView.layer)
+            contentView.layer.frame = contentView.frame
+            CATransaction.commit()
+        }
+        keyboardProtectedContentView = nil
+        keyboardProtectedSuperlayer = nil
+        keyboardSecureTextField?.removeFromSuperview()
+        keyboardSecureTextField = nil
+        // Retired on the next runloop turn: `CALayer.delegate` is `unowned(unsafe)`,
+        // so a canvas layer that outlives its view crashes in `objc_retain`.
+        if let retired = keyboardProtectedContainerView {
+            keyboardProtectedContainerView = nil
+            DispatchQueue.main.async { _ = retired }
+        }
+    }
+
+    /// The keyboard lives in its own private window in the app's scene.
+    private static func keyboardWindow() -> UIWindow? {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows
+            where NSStringFromClass(type(of: window)).lowercased().contains("keyboard") {
+                return window
+            }
+        }
+        return nil
+    }
+
+    /// Moves [contentLayer] into the capture-excluded [canvas] without an implicit
+    /// animation, since this can run inside UIKit's own layout passes.
     private func nest(contentLayer: CALayer, in canvas: CALayer, frame: CGRect) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -194,10 +300,8 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         secureTextField = nil
         protectedContentView = nil
         protectedContentSuperlayer = nil
-        // Released on the next runloop turn: CoreAnimation's current transaction
-        // can still reference the canvas layer, and a layer that outlives its
-        // delegate - `CALayer.delegate` is `unowned(unsafe)` - crashes in
-        // `objc_retain` when it is touched again.
+        // Released on the next runloop turn: CoreAnimation's transaction can still
+        // reference the layer, and outliving its `unowned(unsafe)` delegate crashes.
         if let retired = protectedContainerView {
             protectedContainerView = nil
             DispatchQueue.main.async { _ = retired }
@@ -208,8 +312,7 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         backgroundBlurEnabled = blurEnabled
         if blurEnabled {
             guard backgroundObserverTokens.isEmpty else { return }
-            // willResignActive fires before the app-switcher snapshot is
-            // captured, so the blur is reliably included in it.
+            // willResignActive fires before the app-switcher snapshot, so the blur is in it.
             let willResignActive = NotificationCenter.default.addObserver(
                 forName: UIApplication.willResignActiveNotification,
                 object: nil,
@@ -261,7 +364,6 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
             window.addSubview(blurView)
         }
         backgroundBlurView = blurView
-        // Commit the blur immediately so the app-switcher snapshot includes it.
         window.setNeedsLayout()
         window.layoutIfNeeded()
         CATransaction.flush()

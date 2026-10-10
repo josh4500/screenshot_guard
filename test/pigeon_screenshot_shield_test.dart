@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:screenshot_shield/src/pigeon_screenshot_shield.dart';
 import 'package:screenshot_shield/src/screenshot_shield_messages.dart';
@@ -18,6 +19,15 @@ class _FakeHostApi extends ScreenshotShieldHostApi {
 
   @override
   Future<void> setBackgroundBlur(bool blurEnabled) async => calls.add('setBackgroundBlur:$blurEnabled');
+
+  @override
+  Future<void> setKeyboardProtected(bool enabled) async => calls.add('setKeyboardProtected:$enabled');
+}
+
+/// A host that predates the keyboard call, or a platform without it.
+class _UnsupportedKeyboardHostApi extends _FakeHostApi {
+  @override
+  Future<void> setKeyboardProtected(bool enabled) async => throw PlatformException(code: 'no');
 }
 
 void main() {
@@ -54,6 +64,22 @@ void main() {
 
       expect(hostApi.calls, ['startListening']);
       expect(platform.isListening, isTrue);
+    });
+
+    test('forwards keyboard protection to the host', () async {
+      final hostApi = _FakeHostApi();
+      final platform = PigeonScreenshotShield(hostApi: hostApi);
+
+      await platform.setKeyboardProtection(enabled: true);
+      await platform.setKeyboardProtection(enabled: false);
+
+      expect(hostApi.calls, ['setKeyboardProtected:true', 'setKeyboardProtected:false']);
+    });
+
+    test('ignores a host that cannot protect the keyboard', () async {
+      final platform = PigeonScreenshotShield(hostApi: _UnsupportedKeyboardHostApi());
+
+      await expectLater(platform.setKeyboardProtection(enabled: true), completes);
     });
 
     test('stops the host when the last consumer stops', () async {
@@ -129,15 +155,13 @@ void main() {
       final controller = StreamController<bool>.broadcast();
       final platform = PigeonScreenshotShield(hostApi: _FakeHostApi(), screenRecordingStream: () => controller.stream);
       addTearDown(controller.close);
-      // Nothing has been reported yet.
       expect(platform.isScreenRecording, isFalse);
 
       await platform.startListening();
 
       controller.add(true);
       await Future<void>.delayed(Duration.zero);
-      // Something mounting now has to learn this without any further event: the
-      // broadcast stream never replays the change it missed.
+      // The broadcast stream never replays a change a late listener missed.
       expect(platform.isScreenRecording, isTrue);
 
       controller.add(false);
@@ -146,9 +170,8 @@ void main() {
     });
 
     test('survives a screen recording stream that is never answered', () async {
-      // No stream is provided, so the default event channel has no handler here:
-      // the eager subscription must swallow that rather than surface an unhandled
-      // error to the caller.
+      // With no stream provided the default event channel has no handler here,
+      // so the subscription must swallow the error instead of surfacing it.
       final platform = PigeonScreenshotShield(hostApi: _FakeHostApi());
       await platform.startListening();
       await Future<void>.delayed(Duration.zero);

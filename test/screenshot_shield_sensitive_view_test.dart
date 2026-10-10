@@ -19,8 +19,7 @@ class _FakeShieldPlatform extends ScreenshotShieldPlatform {
   @override
   Future<void> startListening() async {
     calls.add('startListening');
-    // Mirror PigeonScreenshotShield: the cached state is tracked while listening,
-    // so a widget that mounts later can read the current value.
+    // Mirror PigeonScreenshotShield: cache the state so later widgets can read it.
     _subscription ??= recording.stream.listen(reportScreenRecordingState, onError: (Object _) {});
   }
 
@@ -32,8 +31,7 @@ class _FakeShieldPlatform extends ScreenshotShieldPlatform {
 }
 
 void main() {
-  // Capture prevention is process-wide state that mirrors the platform plugin,
-  // so every test starts from a known state.
+  // Prevention is process-wide, so each test starts from a known state.
   setUp(() async {
     await ScreenshotShield(platform: _FakeShieldPlatform()).setProtection(preventCapture: false);
   });
@@ -98,14 +96,12 @@ void main() {
       respondToSnapshots = true;
       createCalls = 0;
       final TestDefaultBinaryMessenger messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      // Kept installed for the whole test (including teardown): disposing the
-      // platform view talks to this channel too.
+      // Stays installed through teardown: disposal also talks to this channel.
       messenger.setMockMethodCallHandler(SystemChannels.platform_views, (MethodCall call) async {
         if (call.method == 'create') {
           createCalls++;
           final int viewId = (call.arguments as Map<Object?, Object?>)['id'] as int;
           if (respondToSnapshots) {
-            // The widget addresses its own platform view on a per-view channel.
             messenger.setMockMethodCallHandler(MethodChannel('screenshot_shield/sensitive_view/$viewId'), (
               MethodCall call,
             ) async {
@@ -131,8 +127,7 @@ void main() {
       await tester.pump();
     }
 
-    /// Broadcast events are delivered in a microtask, which can land after the
-    /// frame `pump` started, so rebuild once more.
+    /// Broadcast delivery can land after the frame `pump` started, so pump twice.
     Future<void> emitRecording(WidgetTester tester, bool recording) async {
       platform.recording.add(recording);
       await tester.pump();
@@ -209,12 +204,8 @@ void main() {
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('engages when it appears while the screen is already being recorded', (WidgetTester tester) async {
-      // The recording starts before this region exists, and the state event has
-      // already been delivered to whoever was listening: the stream will not
-      // replay it, so the region has to read the current state instead.
+      // The change event fired before this region existed and is not replayed.
       await tester.pumpWidget(const SizedBox());
-      // A guard on the previous screen was already listening when the recording
-      // started, so the change event has been and gone.
       await shield.startListening();
       await emitRecording(tester, true);
 
@@ -224,7 +215,6 @@ void main() {
       await settleSnapshot(tester);
       expect(renderRegion(tester).captureColor, isNotNull);
 
-      // And it still follows the state afterwards.
       await emitRecording(tester, false);
       expect(find.byType(UiKitView), findsNothing);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
@@ -233,18 +223,15 @@ void main() {
       await tester.pumpWidget(region(protection: SensitiveProtection.whileRecording));
       expect(find.byType(UiKitView), findsNothing);
 
-      // Going to the background must not engage it in this mode.
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await tester.pump();
       expect(find.byType(UiKitView), findsNothing);
 
-      // A recording must.
       await emitRecording(tester, true);
       expect(find.byType(UiKitView), findsOneWidget);
       await settleSnapshot(tester);
       expect(renderRegion(tester).captureColor, isNotNull);
 
-      // A recording that starts while the app is backgrounded still engages it.
       await emitRecording(tester, false);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await tester.pump();
@@ -350,8 +337,7 @@ void main() {
         ),
       );
 
-      // The region receives a tight 200x100 from the SizedBox and has to hand it
-      // to the guarded subtree untouched: a loose stack would report 0 here.
+      // The tight 200x100 constraints must reach the subtree untouched.
       expect(seen!.minWidth, 200);
       expect(seen!.minHeight, 100);
       expect(seen!.maxHeight, 100);
@@ -498,10 +484,8 @@ void main() {
       rebuild(() => value++);
       await tester.pump();
       await settleSnapshot(tester);
-      // Inside the throttle window the copy is not re-rasterised.
       expect(snapshotCount(), afterFirstCopy);
 
-      // The deferred refresh lands once the window has passed.
       await tester.pump(const Duration(seconds: 2));
       await settleSnapshot(tester);
       expect(snapshotCount(), greaterThan(afterFirstCopy));
