@@ -1,5 +1,41 @@
 ## 0.1.11
 
+### Fixes
+
+* **Android:** screenshot detection could crash the host app on Android 7-9: the media
+  store query asked for `RELATIVE_PATH`, which only exists from Android 10, and only
+  permission errors were caught. The query now adapts to the Android version, never
+  throws, runs off the main thread, and reports each screenshot once.
+* **Android:** `backgroundBlur` left the app-switcher thumbnail readable with Flutter's
+  default rendering. Android 13+ now disables the thumbnail outright (screenshots and
+  their detection are unaffected, and dialogs no longer flash a blur); older versions use
+  a blur or an opaque cover.
+* **Android:** `preventCapture` is re-applied to every activity that attaches, and is
+  remembered when requested before one exists.
+* **iOS:** `preventCapture` is re-applied when UIKit undoes it - after a full-screen modal
+  is dismissed, when the app becomes active - and is installed once a window exists when
+  requested earlier. A replaced root view is detected instead of blanking the app.
+* **iOS:** the privacy manifest is now bundled (SwiftPM and CocoaPods). Recording state is
+  read per scene (`sceneCaptureState` on iOS 17+) instead of from the deprecated
+  `UIScreen.main`.
+* **Windows:** `preventCapture` now works, via `SetWindowDisplayAffinity`. The window is no
+  longer hidden whenever it loses focus; `backgroundBlur` instead opts in to icon-only
+  taskbar and Alt+Tab previews. Recording detection samples continuously (it ran once) and
+  no longer reports the resident Xbox Game Bar as a recorder.
+* **Linux:** recorders with names longer than 15 characters (such as
+  `gpu-screen-recorder`) are detected.
+* **Guards:** when one of two active guards went away it switched protection off for both,
+  and changing a guard's settings while it was active could leak a listener or stop
+  detection for another guard. Guards now count their requests.
+
+### Other changes
+
+* The README is reorganised around a feature list, a platform support table and a quick
+  start, and documents the Android media permission needed on Android 10-13 and the
+  permissions the plugin merges into the app.
+* pub.dev listing: clearer description, topics, issue tracker and a screenshot.
+* CI builds the example on Android, iOS, Windows and Linux and runs a publish dry-run;
+  releases publish from a version tag through pub.dev's automated publishing.
 * Add `ScreenshotShield.setKeyboardProtection(enabled:)` (iOS): the on-screen
   keyboard is a private window of its own, so it survived both whole-window
   protection and a sensitive region and was visible in captures. The plugin now

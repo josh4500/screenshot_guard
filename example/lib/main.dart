@@ -99,7 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
             SwitchListTile(
               title: const Text('Prevent capture'),
               subtitle: const Text(
-                'Blanks the captured frame (Android and iOS)',
+                'Blanks the captured frame (Android, iOS and Windows)',
               ),
               value: preventCapture,
               onChanged: (value) => setState(() => preventCapture = value),
@@ -112,7 +112,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             SwitchListTile(
               title: const Text('Background blur'),
-              subtitle: const Text('Blur the app in the app switcher'),
+              subtitle: const Text(
+                "Hide the app's content in the app switcher",
+              ),
               value: backgroundBlur,
               onChanged: (value) async {
                 setState(() => backgroundBlur = value);
