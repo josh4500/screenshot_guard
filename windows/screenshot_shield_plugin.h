@@ -33,6 +33,13 @@ class ScreenshotShieldPlugin : public flutter::Plugin {
   // stream.
   void PollScreenRecording();
 
+  // Host API: keep the window out of screen captures.
+  void SetProtected(bool protect);
+
+  // Host API: hide the live window preview in the taskbar and Alt+Tab.
+  void SetBackgroundBlur(bool enabled);
+
+  // The top-level window the attributes and the sampling timer apply to.
   void SetWindow(HWND window);
 
   // Disallow copy and assign.

@@ -3,6 +3,8 @@
 #include <flutter_linux/flutter_linux.h>
 #include <gtk/gtk.h>
 
+#include <string.h>
+
 static const char kStartListeningChannel[] =
     "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.startListening";
 static const char kStopListeningChannel[] =
@@ -11,6 +13,8 @@ static const char kSetProtectedChannel[] =
     "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setProtected";
 static const char kSetBackgroundBlurChannel[] =
     "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setBackgroundBlur";
+static const char kSetKeyboardProtectedChannel[] =
+    "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldHostApi.setKeyboardProtected";
 static const char kOnScreenshotDetectedChannel[] =
     "dev.flutter.pigeon.screenshot_shield.ScreenshotShieldEventChannelApi.onScreenshotDetected";
 static const char kOnScreenRecordingChangedChannel[] =
@@ -19,16 +23,14 @@ static const char kOnScreenRecordingChangedChannel[] =
 // Linux has no API that tells an app it is being recorded, so this is a
 // best-effort heuristic that looks for well-known screen-recording programs in
 // /proc. It can produce false positives (a recorder is running but not
-// recording) and false negatives (an unlisted recorder is used, or a sandboxed
-// app whose process name differs from its application name).
-static const char* kScreenRecorderProcesses[] = {
-    "obs",           "bdcam",       "bandicam",
-    "camtasia",      "screenrec",   "flashback",
-    "fraps",         "screencast",  "loom",
-    "snagit",        "screenflow",  "movavi",
-    "kazam",         "simplescreenrecorder", "recordmydesktop",
-    "vokoscreen",    "kooha",       "gpu-screen-recorder",
-    "wf-recorder",   "peek",        "gamebar",
+// recording) and false negatives (an unlisted recorder is used, a sandboxed app
+// whose binary name differs, or GNOME's built-in recorder, which runs inside
+// gnome-shell). Program names are matched exactly.
+static const char* kScreenRecorderPrograms[] = {
+    "obs",           "simplescreenrecorder", "recordmydesktop",
+    "vokoscreen",    "vokoscreenng",         "kazam",
+    "kooha",         "wf-recorder",          "peek",
+    "gpu-screen-recorder", "green-recorder", "blue-recorder",
     nullptr,
 };
 
@@ -60,6 +62,7 @@ static FlBasicMessageChannel* s_start_channel = nullptr;
 static FlBasicMessageChannel* s_stop_channel = nullptr;
 static FlBasicMessageChannel* s_set_protected_channel = nullptr;
 static FlBasicMessageChannel* s_set_background_blur_channel = nullptr;
+static FlBasicMessageChannel* s_set_keyboard_protected_channel = nullptr;
 static FlEventChannel* s_event_channel = nullptr;
 static FlEventChannel* s_screen_recording_channel = nullptr;
 
@@ -70,22 +73,36 @@ static gboolean s_has_screen_recording_state = FALSE;
 static gboolean s_screen_recording_state = FALSE;
 static guint s_screen_recording_poll_source = 0;
 
-static gboolean is_screen_recorder_process(const gchar* name) {
-  g_autofree gchar* lower = g_ascii_strdown(name, -1);
-  for (guint i = 0; kScreenRecorderProcesses[i] != nullptr; i++) {
-    const gchar* token = kScreenRecorderProcesses[i];
-    if (g_strcmp0(token, "obs") == 0) {
-      // Match OBS variants (obs, obs32, obs64, obs-studio, obs-browser)
-      // without matching unrelated names such as "observer".
-      if (g_strcmp0(lower, "obs") == 0 || g_str_has_prefix(lower, "obs32") ||
-          g_str_has_prefix(lower, "obs64") ||
-          g_str_has_prefix(lower, "obs-studio") ||
-          g_str_has_prefix(lower, "obs-browser")) {
-        return TRUE;
-      }
-    } else if (g_strstr_len(lower, -1, token) != nullptr) {
+static gboolean is_screen_recorder_program(const gchar* path) {
+  g_autofree gchar* base = g_path_get_basename(path);
+  g_autofree gchar* lower = g_ascii_strdown(base, -1);
+  for (guint i = 0; kScreenRecorderPrograms[i] != nullptr; i++) {
+    if (g_strcmp0(lower, kScreenRecorderPrograms[i]) == 0) {
       return TRUE;
     }
+  }
+  return FALSE;
+}
+
+// Reads the program from /proc/<pid>/cmdline rather than /proc/<pid>/comm,
+// which the kernel truncates to 15 characters ("gpu-screen-reco"). The second
+// argument is checked too, for recorders launched through an interpreter
+// ("python3 /usr/bin/kazam").
+static gboolean is_screen_recorder_pid(const gchar* pid) {
+  g_autofree gchar* path = g_strdup_printf("/proc/%s/cmdline", pid);
+  g_autofree gchar* contents = nullptr;
+  gsize length = 0;
+  if (!g_file_get_contents(path, &contents, &length, nullptr) || length == 0) {
+    return FALSE;
+  }
+  // Arguments are NUL-separated; the buffer is NUL-terminated by GLib.
+  const gchar* argv0 = contents;
+  if (is_screen_recorder_program(argv0)) {
+    return TRUE;
+  }
+  const gsize argv0_length = strlen(argv0);
+  if (argv0_length + 1 < length) {
+    return is_screen_recorder_program(contents + argv0_length + 1);
   }
   return FALSE;
 }
@@ -106,16 +123,7 @@ static gboolean is_known_recorder_running(void) {
         break;
       }
     }
-    if (!numeric) {
-      continue;
-    }
-    g_autofree gchar* path = g_strdup_printf("/proc/%s/comm", entry_name);
-    g_autofree gchar* contents = nullptr;
-    if (!g_file_get_contents(path, &contents, nullptr, nullptr)) {
-      continue;
-    }
-    g_strstrip(contents);
-    if (is_screen_recorder_process(contents)) {
+    if (numeric && is_screen_recorder_pid(entry_name)) {
       found = TRUE;
     }
   }
@@ -229,6 +237,9 @@ void screenshot_shield_plugin_register_with_registrar(
                         screenshot_shield_plugin_message_cb);
   register_host_channel(messenger, kSetBackgroundBlurChannel,
                         &s_set_background_blur_channel,
+                        screenshot_shield_plugin_message_cb);
+  register_host_channel(messenger, kSetKeyboardProtectedChannel,
+                        &s_set_keyboard_protected_channel,
                         screenshot_shield_plugin_message_cb);
 
   if (s_event_channel == nullptr) {
