@@ -1,6 +1,6 @@
 name: screenshot_shield
 description: Detect screenshots and screen recording, blank screen captures of a whole screen or a sensitive region, and hide your app in the app switcher.
-version: 0.1.11
+version: 0.2.0
 repository: https://github.com/josh4500/screenshot_guard
 issue_tracker: https://github.com/josh4500/screenshot_guard/issues
 
