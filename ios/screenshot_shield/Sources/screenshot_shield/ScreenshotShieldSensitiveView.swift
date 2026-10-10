@@ -110,6 +110,11 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
                     // transparent parts, absent from captures.
                     self.imageView.backgroundColor = backdropValue.map(Self.color(fromArgb:)) ?? .clear
                     self.imageView.image = image
+                    // Cheap when nothing moved; catches a canvas UIKit replaced without
+                    // laying the region out, within one refresh.
+                    if self.secureField != nil, self.container.window != nil {
+                        self.layoutProtectedRegion()
+                    }
                 }
                 result(nil)
             case "setEnabled":

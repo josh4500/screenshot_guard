@@ -143,6 +143,7 @@ void main() {
       Duration? refreshInterval,
       Color? captureColor,
       Color? backdropColor,
+      Widget? capturePlaceholder,
     }) {
       return ScreenshotShieldScope(
         shield: shield,
@@ -155,6 +156,7 @@ void main() {
               refreshInterval: refreshInterval,
               captureColor: captureColor,
               backdropColor: backdropColor,
+              capturePlaceholder: capturePlaceholder,
               child: child ?? const SizedBox(width: 200, height: 80, child: Text('secret')),
             ),
           ),
@@ -188,6 +190,47 @@ void main() {
 
       expect(find.byType(UiKitView), findsOneWidget);
       expect(renderRegion(tester).captureColor, isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('shows the capture placeholder instead of the capture colour once a copy exists', (
+      WidgetTester tester,
+    ) async {
+      const placeholderKey = Key('placeholder');
+      var taps = 0;
+      await tester.pumpWidget(
+        region(
+          protection: SensitiveProtection.always,
+          child: GestureDetector(
+            onTap: () => taps++,
+            child: const SizedBox(width: 200, height: 80, child: Text('secret')),
+          ),
+          capturePlaceholder: const ColoredBox(key: placeholderKey, color: Color(0xFF00FF00), child: Text('hidden')),
+        ),
+      );
+      // Before the first copy nothing is painted over the live subtree.
+      expect(find.byKey(placeholderKey), findsNothing);
+
+      await settleSnapshot(tester);
+      expect(find.byKey(placeholderKey), findsOneWidget);
+      expect(renderRegion(tester).captureColor, isNull, reason: 'the placeholder replaces the solid colour');
+      // It fills the region exactly.
+      expect(tester.getSize(find.byKey(placeholderKey)), const Size(200, 80));
+      // Taps still reach the live subtree, and the placeholder adds no semantics.
+      await tester.tap(find.text('secret'));
+      expect(taps, 1);
+      expect(find.bySemanticsLabel('hidden'), findsNothing);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('keeps the same native view when the placeholder appears', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        region(
+          protection: SensitiveProtection.always,
+          capturePlaceholder: const ColoredBox(color: Color(0xFF000000)),
+        ),
+      );
+      final State<StatefulWidget> before = tester.state(find.byType(UiKitView));
+      await settleSnapshot(tester);
+      expect(identical(tester.state(find.byType(UiKitView)), before), isTrue);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('engages while the screen is being recorded', (WidgetTester tester) async {
