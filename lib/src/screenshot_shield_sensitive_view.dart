@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:async';
 import 'dart:ui' as ui;
 
@@ -69,9 +70,20 @@ class ScreenshotShieldSensitiveView extends StatefulWidget {
   /// [SensitiveProtection.whileCaptured].
   final SensitiveProtection protection;
 
-  /// Minimum time between refreshes of the copy, or `null` to refresh on every frame in
-  /// which the subtree repaints. Set it to cap the rasterising cost of busy regions.
+  /// Minimum time between refreshes of the copy while the region is engaged.
+  ///
+  /// Each refresh rasterises the subtree and reads it back from the GPU, so this caps
+  /// the cost of regions that repaint often (a blinking caret, an animation). Defaults
+  /// to [defaultRefreshInterval] (about 30 refreshes a second); pass [Duration.zero] to
+  /// refresh on every frame in which the subtree repaints.
   final Duration? refreshInterval;
+
+  /// The [refreshInterval] used when none is given.
+  static const Duration defaultRefreshInterval = Duration(milliseconds: 33);
+
+  /// The highest pixel ratio the copy is rasterised at. Above it (3x phones) the copy
+  /// is upscaled on screen, which is barely visible and less than half the readback.
+  static const double maxCopyPixelRatio = 2.0;
 
   /// Whether the region may protect at all; `false` builds [child] untouched.
   final bool enabled;
@@ -312,9 +324,15 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     if (!_engaged) {
       return;
     }
-    final Duration? interval = widget.refreshInterval;
-    if (interval == null || _throttleTimer != null) {
+    final Duration interval = widget.refreshInterval ?? ScreenshotShieldSensitiveView.defaultRefreshInterval;
+    if (interval <= Duration.zero) {
       scheduleRefresh();
+      return;
+    }
+    if (_throttleTimer != null) {
+      // A refresh is already due at the end of the window; it captures the latest
+      // paint, so this one needs nothing of its own. (Refreshing here instead would
+      // refresh on every frame of a continuous animation.)
       return;
     }
     final Duration? last = _lastRefresh;
@@ -380,7 +398,11 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     _capturing = true;
     _lastRefresh = WidgetsBinding.instance.currentFrameTimeStamp;
     try {
-      final ui.Image image = await renderObject.toImage(pixelRatio: MediaQuery.maybeDevicePixelRatioOf(context) ?? 1);
+      final double pixelRatio = math.min(
+        MediaQuery.maybeDevicePixelRatioOf(context) ?? 1,
+        ScreenshotShieldSensitiveView.maxCopyPixelRatio,
+      );
+      final ui.Image image = await renderObject.toImage(pixelRatio: pixelRatio);
       try {
         // Raw RGBA: the copy is refreshed continuously, so encoding would cost more.
         final ByteData? data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
@@ -420,7 +442,10 @@ class _ScreenshotShieldSensitiveViewState extends State<ScreenshotShieldSensitiv
     }
     final bool engaged = _engaged;
     return ScreenshotShieldRegionLayout(
-      captureColor: engaged && _snapshotReady ? _captureColor : null,
+      // Until the first copy lands, the live subtree would be visible to a capture, so
+      // it is covered with the (opaque) backdrop: the user sees the region blank for a
+      // frame or two instead of the recording seeing its content.
+      captureColor: engaged ? (_snapshotReady ? _captureColor : _backdropColor.withAlpha(0xFF)) : null,
       onSubtreeSizeChanged: scheduleRefresh,
       children: <Widget>[
         // Same position in the element tree whether or not the region is engaged.

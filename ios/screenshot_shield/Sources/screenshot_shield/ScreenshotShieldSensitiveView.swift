@@ -241,20 +241,35 @@ final class ScreenshotShieldSensitivePlatformView: NSObject, FlutterPlatformView
             return
         }
         let bounds = container.bounds
-        imageView.frame = bounds
-        field.frame = bounds
-        // Laying the field out sizes the private canvas, which UIKit may replace;
-        // that is why it is re-resolved below.
-        field.setNeedsLayout()
-        field.layoutIfNeeded()
+        if field.frame != bounds || imageView.frame != bounds {
+            imageView.frame = bounds
+            field.frame = bounds
+            // Laying the field out sizes the private canvas, which UIKit may replace;
+            // that is why it is re-resolved below. Only needed when the size changed:
+            // this runs on every layout pass of the region.
+            field.setNeedsLayout()
+            field.layoutIfNeeded()
+        }
         guard let canvasView = SecureCanvas.containerView(of: field) else {
-            // Mid-rebuild: keep the current nesting and retry on the next pass.
-            self.canvasView = nil
+            // Mid-rebuild: keep the current nesting - and the canvas view holding the
+            // snapshot layer alive - and retry on the next pass.
             SecureCanvas.log("sensitive view \(viewId): canvas not available, keeping the current nesting")
             return
         }
+        // UIKit may have replaced the canvas. The snapshot layer is still a sublayer
+        // of the previous one, whose layer delegate is `unowned(unsafe)`: releasing
+        // that view before the layer moves out crashes in `objc_retain`. Swap first,
+        // re-nest, then retire the previous view on the next runloop turn.
+        let previousCanvasView = self.canvasView
         self.canvasView = canvasView
-        nestSnapshot(in: canvasView.layer)
+        // Reading `superlayer` is safe here: the canvas view we compare against is held
+        // strongly, and a replaced one is kept alive until the next runloop turn.
+        if !(isNested && previousCanvasView === canvasView && imageView.layer.superlayer === canvasView.layer) {
+            nestSnapshot(in: canvasView.layer)
+        }
+        if let previousCanvasView, previousCanvasView !== canvasView {
+            DispatchQueue.main.async { _ = previousCanvasView }
+        }
         if bounds.size != lastLoggedSize {
             lastLoggedSize = bounds.size
             SecureCanvas.log(
