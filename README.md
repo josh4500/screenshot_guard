@@ -143,9 +143,10 @@ rest stays capturable:
 ScreenshotShieldSensitiveView(
   // What a capture shows where the region is. Defaults to black.
   captureColor: Colors.black,
-  // What the user sees behind the region where the child is transparent.
-  backdropColor: Theme.of(context).scaffoldBackgroundColor,
-  child: const Text('Account number: 1234'),
+  // Only needed when the child has see-through parts (rounded corners, gaps):
+  // the colour behind the region. Defaults to transparent.
+  backdropColor: Theme.of(context).colorScheme.surface,
+  child: const BalanceCard(),
 )
 ```
 
@@ -160,9 +161,15 @@ unchanged, creates no platform view and rasterises nothing. It takes over only w
 screen is recorded or mirrored (`ScreenshotShield.isScreenRecording`) or the app is in the
 background. While engaged, the subtree stays live and interactive - taps, focus and text
 input reach `child` - and a native view nested in a capture-excluded canvas shows a copy
-of it that refreshes whenever the subtree repaints (at most once per frame). A capture
-sees `captureColor` instead. `ScreenshotShieldSensitiveViewController.refresh()`
-refreshes on demand.
+of it that refreshes when the subtree repaints, about 30 times a second by default
+(`refreshInterval`; `Duration.zero` refreshes on every frame). A capture sees
+`captureColor` instead. `ScreenshotShieldSensitiveViewController.refresh()` refreshes
+on demand.
+
+iOS reports a recording slightly after it starts, and the first copy takes a frame or two
+to land, so the first moments of a recording can include the region. Use
+`protection: SensitiveProtection.always` for content that must never appear, at the cost
+below.
 
 `protection: SensitiveProtection.always` keeps the region engaged permanently, which also
 blanks foreground screenshots, at these costs:

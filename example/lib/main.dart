@@ -360,6 +360,9 @@ class _SecondScreenState extends State<SecondScreen> {
             protection: _protection,
             refreshInterval: _animationRefresh,
             captureColor: Colors.black,
+            // The card has rounded corners: show the page colour behind them while
+            // the region is engaged, instead of captureColor.
+            backdropColor: Theme.of(context).colorScheme.surface,
             child: const _AnimatedBalanceCard(),
           ),
           const SizedBox(height: 24),

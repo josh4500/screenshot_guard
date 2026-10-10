@@ -182,20 +182,12 @@ void main() {
       expect(regionRect, bareRect);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-    testWidgets('covers the subtree with the opaque backdrop until a copy exists', (WidgetTester tester) async {
-      // Before the first copy lands the excluded canvas is empty, so a capture would see
-      // the live subtree: it is covered instead, and the user sees the backdrop briefly.
-      const backdrop = Color(0x80123456);
-      const capture = Color(0xFF000000);
-      await tester.pumpWidget(
-        region(protection: SensitiveProtection.always, backdropColor: backdrop, captureColor: capture),
-      );
+    testWidgets('paints nothing over the subtree until a copy exists', (WidgetTester tester) async {
+      // Covering it would flash the region on screen when it engages.
+      await tester.pumpWidget(region(protection: SensitiveProtection.always));
 
       expect(find.byType(UiKitView), findsOneWidget);
-      expect(renderRegion(tester).captureColor, backdrop.withAlpha(0xFF));
-
-      await settleSnapshot(tester);
-      expect(renderRegion(tester).captureColor, capture);
+      expect(renderRegion(tester).captureColor, isNull);
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('engages while the screen is being recorded', (WidgetTester tester) async {
@@ -525,6 +517,31 @@ void main() {
       expect(copies, greaterThan(3), reason: 'the copy must keep tracking the animation');
       final int cap = (30 * 16 / ScreenshotShieldSensitiveView.defaultRefreshInterval.inMilliseconds).ceil() + 2;
       expect(copies, lessThanOrEqualTo(cap), reason: 'refreshes must respect the default interval');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    testWidgets('keeps refreshing an animating region after it disengages and re-engages', (WidgetTester tester) async {
+      // Opening Control Center to start a recording disengages and re-engages a region;
+      // a throttle timer left over from the first engagement froze the copy.
+      Future<void> animate(int frames) async {
+        for (var i = 0; i < frames; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+        }
+      }
+
+      await tester.pumpWidget(region(child: const _Spinner()));
+      await emitRecording(tester, true);
+      await settleSnapshot(tester);
+      await animate(10);
+      await emitRecording(tester, false);
+      await animate(2);
+      await emitRecording(tester, true);
+      await settleSnapshot(tester);
+
+      final int before = snapshotCount();
+      await animate(30);
+      await settleSnapshot(tester);
+      expect(snapshotCount() - before, greaterThan(3), reason: 'the copy must keep tracking the animation');
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     testWidgets('refreshes an animating region more often with Duration.zero', (WidgetTester tester) async {
