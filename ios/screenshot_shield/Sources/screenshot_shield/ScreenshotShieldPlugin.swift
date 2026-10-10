@@ -21,6 +21,12 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     private var backgroundBlurEnabled = false
     private var backgroundBlurView: UIVisualEffectView?
     private var backgroundObserverTokens: [NSObjectProtocol] = []
+    // What Dart asked for. UIKit can undo the nesting (a full-screen modal takes the
+    // content view out of the window and puts it back), so it is re-applied when the
+    // app activates and whenever the content view returns to a window.
+    private var protectionRequested = false
+    private var protectionObserverTokens: [NSObjectProtocol] = []
+    private var reattachSentinel: ReattachSentinelView?
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let messenger = registrar.messenger()
@@ -79,22 +85,58 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         screenRecordingStreamHandler.emitScreenRecordingChanged(isScreenRecording)
     }
 
-    /// `UIScreen.isCaptured` covers screen recording and mirroring. The simulator
-    /// always reports `true`, so it is treated as not captured.
+    /// Whether the app's scene is being recorded, mirrored or shared. iOS 17+ reports
+    /// this per scene (correct with Stage Manager and external displays); earlier
+    /// versions read the scene's screen. The simulator is treated as not captured.
     private var isScreenRecording: Bool {
         #if targetEnvironment(simulator)
             return false
         #else
-            return UIScreen.main.isCaptured
+            guard let window = Self.keyWindow() else { return UIScreen.main.isCaptured }
+            if #available(iOS 17.0, *) {
+                return window.traitCollection.sceneCaptureState == .active
+            }
+            return window.windowScene?.screen.isCaptured ?? UIScreen.main.isCaptured
         #endif
     }
 
     public func setProtected(protected: Bool) throws {
+        protectionRequested = protected
         if protected {
+            installProtectionObservers()
             enableCaptureProtection()
         } else {
+            removeProtectionObservers()
             disableCaptureProtection()
         }
+    }
+
+    /// Re-applies protection at the moments UIKit may have undone it, or when it could
+    /// not be installed yet because there was no window.
+    private func installProtectionObservers() {
+        guard protectionObserverTokens.isEmpty else { return }
+        let names: [Notification.Name] = [
+            UIApplication.didBecomeActiveNotification,
+            UIScene.didActivateNotification,
+            UIWindow.didBecomeKeyNotification,
+        ]
+        protectionObserverTokens = names.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.reassertProtection()
+            }
+        }
+    }
+
+    private func removeProtectionObservers() {
+        for token in protectionObserverTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
+        protectionObserverTokens = []
+    }
+
+    private func reassertProtection() {
+        guard protectionRequested else { return }
+        enableCaptureProtection()
     }
 
     // MARK: - Capture protection
@@ -106,7 +148,17 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     /// into it (a sibling field only protects itself). The field is sized to the
     /// window at origin so canvas coordinates and the content frame stay valid.
     private func enableCaptureProtection() {
+        if let contentView = protectedContentView, let field = secureTextField, isStale(contentView: contentView, field: field) {
+            // The window or its root view was replaced (add-to-app, a new root view
+            // controller, a reconnected scene): nesting the old view into the old field
+            // would show nothing, so start over on the current window.
+            SecureCanvas.log("capture protection stale: reinstalling on the current window")
+            disableCaptureProtection()
+        }
         if let contentView = protectedContentView, let field = secureTextField {
+            // Out of the window (e.g. under a full-screen modal): the sentinel re-nests
+            // it once UIKit puts it back.
+            guard contentView.window != nil else { return }
             // Re-assert the nesting: UIKit can rebuild the window's layer tree (e.g.
             // on return from background) and silently undo it; re-resolve the canvas too.
             guard let canvasView = SecureCanvas.containerView(of: field) else {
@@ -149,11 +201,39 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         protectedContentView = contentView
         protectedContentSuperlayer = originalSuperlayer
         protectedContainerView = canvasView
+        attachSentinel(to: contentView)
         SecureCanvas.log(
             "capture protection enabled: \(type(of: contentView)) layer nested in "
                 + "\(NSStringFromClass(type(of: canvasView))), superlayer now "
                 + "\(contentView.layer.superlayer.map { NSStringFromClass(type(of: $0)) } ?? "nil")"
         )
+    }
+
+    /// Whether the protected view is no longer the content of the field's window.
+    private func isStale(contentView: UIView, field: UITextField) -> Bool {
+        guard let window = field.window else { return true }
+        // Away from any window (e.g. covered by a full-screen modal) is not stale: the
+        // sentinel re-nests it when it comes back.
+        guard let contentWindow = contentView.window else { return false }
+        if contentWindow !== window { return true }
+        if let rootView = window.rootViewController?.view, rootView !== contentView { return true }
+        return false
+    }
+
+    /// A hidden subview of the protected content view. When UIKit takes the content
+    /// view out of the window and re-adds it, the content layer lands back in the
+    /// window's layer, outside the capture-excluded canvas; the sentinel sees the view
+    /// return to a window and re-asserts protection.
+    private func attachSentinel(to contentView: UIView) {
+        if reattachSentinel?.superview === contentView { return }
+        reattachSentinel?.removeFromSuperview()
+        let sentinel = ReattachSentinelView()
+        sentinel.onReturnToWindow = { [weak self] in
+            // After UIKit finishes re-adding the view.
+            DispatchQueue.main.async { self?.reassertProtection() }
+        }
+        contentView.addSubview(sentinel)
+        reattachSentinel = sentinel
     }
 
     // MARK: - Keyboard protection (iOS only)
@@ -286,6 +366,8 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
     }
 
     private func disableCaptureProtection() {
+        reattachSentinel?.removeFromSuperview()
+        reattachSentinel = nil
         if let contentView = protectedContentView {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -397,7 +479,7 @@ public class ScreenshotShieldPlugin: NSObject, FlutterPlugin, ScreenshotShieldHo
         if let screenRecordingObserver {
             NotificationCenter.default.removeObserver(screenRecordingObserver)
         }
-        for token in backgroundObserverTokens {
+        for token in backgroundObserverTokens + protectionObserverTokens + keyboardObserverTokens {
             NotificationCenter.default.removeObserver(token)
         }
         disableCaptureProtection()
@@ -438,5 +520,28 @@ class ScreenRecordingStreamHandler: OnScreenRecordingChangedStreamHandler {
     func emitScreenRecordingChanged(_ isRecording: Bool) {
         lastState = isRecording
         eventSink?.success(isRecording)
+    }
+}
+
+/// Invisible marker that reports when its superview is put back into a window.
+final class ReattachSentinelView: UIView {
+    var onReturnToWindow: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: .zero)
+        isHidden = true
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            onReturnToWindow?()
+        }
     }
 }
