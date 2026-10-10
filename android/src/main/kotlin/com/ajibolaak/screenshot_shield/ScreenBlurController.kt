@@ -12,10 +12,11 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 
 /**
- * Hides an [Activity]'s content while backgrounded. A [RenderEffect] blur (Android
- * 12+) reaches only the view hierarchy, so it is applied only when the window has a
- * [TextureView]; Flutter's default [SurfaceView] draws on a separate surface a
- * parent blur cannot touch and gets a dim overlay instead.
+ * Hides an [Activity]'s content while backgrounded, on Android 12 and below (13+
+ * disables the app-switcher thumbnail instead). A [RenderEffect] blur (Android 12)
+ * reaches only the view hierarchy, so it is applied only when the window has a
+ * [TextureView]; Flutter's default SurfaceView draws on a separate surface a parent
+ * blur cannot touch and gets an opaque cover instead.
  */
 internal class ScreenBlurController(private val context: Context) {
 
@@ -54,7 +55,7 @@ internal class ScreenBlurController(private val context: Context) {
     private fun showDimOverlay(decorView: View) {
         if (decorView !is ViewGroup) return
         val view = dimView ?: View(context).apply {
-            setBackgroundColor(Color.argb(217, 0, 0, 0))
+            setBackgroundColor(Color.BLACK)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
