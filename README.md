@@ -155,6 +155,9 @@ ScreenshotShieldSensitiveView(
 )
 ```
 
+How it works, and what turned up when testing on a real iPhone, is written up in
+[Keeping a card number out of iPhone screen recordings](https://ajibolaak.dev/notes/keeping-a-card-number-out-of-iphone-screen-recordings).
+
 To show captures something other than a solid colour - a shape matching the content, a
 message, or a blur of the content - pass a `capturePlaceholder`. It is sized to the region
 and drawn beneath the copy, so only screenshots and recordings see it:
